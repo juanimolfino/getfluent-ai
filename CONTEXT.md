@@ -1,0 +1,443 @@
+# Project Context
+
+This repo is a production-oriented AI SaaS boilerplate built to launch small AI products with reusable auth, billing, credits, async jobs, storage, and deployment plumbing already in place.
+
+## 1. Stack completo
+
+- **Next.js 16 App Router**: main web framework, routing, API routes, SSR, static pages, and server/client components. Entry points are `app/layout.tsx`, route pages under `app/(marketing)`, `app/(auth)`, `app/(dashboard)`, and API handlers under `app/api`.
+- **React 19**: UI rendering. Interactive components are client components such as `components/auth/login-form.tsx`, `components/dashboard/job-create-form.tsx`, and `components/dashboard/dashboard-auto-refresh.tsx`.
+- **Tailwind CSS**: styling system. Config lives in `tailwind.config.ts`; global theme tokens and base CSS live in `app/globals.css`.
+- **shadcn-style local UI primitives**: lightweight local Button/Input/Textarea/Badge components live in `components/ui/`.
+- **Lucide React**: icons used in dashboard, pricing, login, and buttons.
+- **Supabase Auth**: magic link and Google OAuth auth provider. Server/browser clients live in `lib/supabase/server.ts`, `lib/supabase/browser.ts`, and auth cookie refresh logic lives in `lib/supabase/middleware.ts`. Route entry points are `app/(auth)/login/page.tsx`, `app/(auth)/callback/route.ts`, `app/(auth)/login/google/route.ts`, and `app/(auth)/logout/route.ts`.
+- **Supabase Postgres**: primary database. Drizzle schema is in `lib/db/schema.ts`; migration output is in `drizzle/`.
+- **Supabase Storage**: stores generated images/audio in a private bucket. Upload and signed URL helpers live in `lib/ai/storage.ts`; bucket name comes from `SUPABASE_STORAGE_BUCKET` and currently defaults to `ai-results`.
+- **Drizzle ORM**: type-safe DB schema and queries. DB client entry point is `lib/db/index.ts`, business queries are in `lib/db/queries.ts`, and CLI config is `drizzle.config.ts`.
+- **Upstash Redis REST**: user-level concurrent job rate limiting. Entry point is `lib/redis/rate-limit.ts`.
+- **Inngest**: async AI job runner with step isolation. Client is `lib/inngest/client.ts`, function is `lib/inngest/functions.ts`, and public endpoint is `app/api/inngest/route.ts`.
+- **fal.ai**: demo image provider using Flux Schnell. Adapter is `lib/ai/providers/fal.ts`.
+- **OpenAI TTS**: demo text-to-speech provider. Adapter is `lib/ai/providers/openai-tts.ts`.
+- **Stripe**: checkout, subscriptions, customer portal, and webhook-driven credit allocation. Client is `lib/stripe/client.ts`, pricing config is `lib/stripe/pricing.ts`, and route handlers are under `app/api/stripe/`.
+- **Resend + React Email-style templates**: optional transactional email for welcome, purchase, and job-ready notifications. Templates are in `emails/`; safe send helpers are in `lib/email/send.ts`. Email failures are intentionally non-blocking.
+- **Vercel**: deployment target. Production currently runs at `https://ai-project-1-gold.vercel.app`.
+
+## 2. Flujo de un job de AI de punta a punta
+
+1. User opens dashboard at `app/(dashboard)/dashboard/page.tsx`.
+   - The page reads the Supabase session with `createSupabaseServerClient()` from `lib/supabase/server.ts`.
+   - If no session exists, it redirects to `/login`.
+   - If authenticated, it calls `ensureUserProfile()` and `getDashboard()` from `lib/db/queries.ts`.
+
+2. User submits the form in `components/dashboard/job-create-form.tsx`.
+   - The form builds a payload:
+     - Image: `{ type: "image", input: { prompt } }`
+     - TTS: `{ type: "tts", input: { text, voice } }`
+   - It sends `POST /api/jobs/create`.
+
+3. Route handler `app/api/jobs/create/route.ts` handles creation.
+   - Reads auth with `createSupabaseServerClient()`.
+   - Validates payload using `createJobSchema` from `lib/ai/validation.ts`.
+   - Calls `ensureUserProfile()` from `lib/db/queries.ts`.
+   - Resolves provider and cost with `getAiProvider()` from `lib/ai/providers/index.ts`.
+   - Reserves a concurrency slot with `reserveJobSlot()` from `lib/redis/rate-limit.ts`.
+   - Calls `createPendingJob()` from `lib/db/queries.ts`, which atomically checks credits, debits credits, inserts a `credit_spend` transaction, and inserts a `jobs` row with `status = pending`.
+   - Sends Inngest event `ai/job.created` through `inngest` from `lib/inngest/client.ts`.
+   - Returns `{ jobId }` immediately.
+
+4. Inngest receives the event at `app/api/inngest/route.ts`.
+   - The registered function is `runAiJob` in `lib/inngest/functions.ts`.
+
+5. Worker `runAiJob` processes the job.
+   - Loads the job row from DB.
+   - Marks it `processing` via `markJobProcessing()` in `lib/db/queries.ts`.
+   - Gets the provider with `getAiProvider(job.type)`.
+   - For image jobs, `lib/ai/providers/fal.ts` calls fal.ai Flux and downloads the generated image bytes.
+   - For TTS jobs, `lib/ai/providers/openai-tts.ts` calls OpenAI audio speech and returns MP3 bytes.
+   - Uploads the generated bytes to private Supabase Storage via `storeAiResult()` in `lib/ai/storage.ts`.
+   - Marks the DB row `done` and stores the object path in `resultUrl` through `markJobDone()`.
+   - Attempts optional `sendJobReadyEmail()` from `lib/email/send.ts`.
+   - Releases the Redis active-job slot with `releaseJobSlot()`.
+
+6. Failure path.
+   - If provider generation, storage, or another worker step fails, `runAiJob` catches the error.
+   - It calls `refundJobCredits()` in `lib/db/queries.ts`.
+   - That idempotently refunds credits, inserts a `credit_refund` transaction, and marks the job `failed` with the error message.
+   - Redis slot is released in `finally`.
+
+7. User sees the result.
+   - `components/dashboard/dashboard-auto-refresh.tsx` calls `router.refresh()` every 2.5 seconds while any job is `pending` or `processing`.
+   - `components/dashboard/job-history.tsx` renders each job.
+   - Result access goes through `app/api/jobs/result/[id]/route.ts`, which verifies ownership and redirects to a short-lived signed Storage URL.
+   - For images, it shows a preview, a `View` link, and a `Download` action.
+   - For TTS, it shows an HTML audio player plus view/download actions.
+
+## 3. Mapa de carpetas
+
+- `app/`: Next.js App Router routes.
+  - `app/layout.tsx`: root HTML layout and global metadata.
+  - `app/globals.css`: global CSS and theme tokens.
+  - `app/(marketing)/page.tsx`: public landing page.
+  - `app/(marketing)/pricing/page.tsx`: pricing page and checkout forms for credit packs/subscription.
+  - `app/(auth)/login/page.tsx`: login page.
+  - `app/(auth)/callback/route.ts`: Supabase auth callback that exchanges code for session and creates profile.
+  - `app/(auth)/login/google/route.ts`: starts Google OAuth from the server so PKCE verifier is stored in cookies.
+  - `app/(auth)/logout/route.ts`: signs out and redirects to login.
+  - `app/(dashboard)/dashboard/page.tsx`: protected dashboard.
+  - `app/api/jobs/create/route.ts`: authenticated job creation endpoint.
+  - `app/api/jobs/status/[id]/route.ts`: authenticated job status endpoint.
+  - `app/api/jobs/result/[id]/route.ts`: authenticated signed result URL redirect.
+  - `app/api/inngest/route.ts`: Inngest webhook/function endpoint.
+  - `app/api/stripe/checkout/route.ts`: Stripe Checkout session creation.
+  - `app/api/stripe/portal/route.ts`: Stripe customer portal session creation.
+  - `app/api/stripe/webhook/route.ts`: Stripe webhook handler.
+  - `app/api/health/route.ts`: production health check for env presence and DB connectivity; protected by `HEALTHCHECK_SECRET` in production.
+  - `app/robots.ts` and `app/sitemap.ts`: SEO crawler endpoints.
+
+- `components/`: React UI.
+  - `components/ui/`: local primitives (`button.tsx`, `input.tsx`, `textarea.tsx`, `badge.tsx`).
+  - `components/auth/login-form.tsx`: magic link and Google login controls.
+  - `components/dashboard/job-create-form.tsx`: interactive AI job form.
+  - `components/dashboard/job-history.tsx`: table of generated jobs with preview/view/download.
+  - `components/dashboard/dashboard-auto-refresh.tsx`: client-side refresh loop for active jobs.
+
+- `lib/`: service clients, domain logic, providers.
+  - `lib/db/`: Drizzle schema, DB client, queries, RLS SQL.
+  - `lib/supabase/`: server, browser, and proxy/middleware auth helpers.
+  - `lib/ai/`: provider interface, validation, storage helper, and provider adapters.
+  - `lib/inngest/`: Inngest client and worker function.
+  - `lib/redis/`: Upstash rate/concurrency limiter.
+  - `lib/stripe/`: Stripe client and pricing metadata.
+  - `lib/email/`: Resend client and safe send helpers.
+  - `lib/utils.ts`: className merge utility.
+
+- `drizzle/`: generated Drizzle migration files and metadata.
+  - `drizzle/0000_black_kang.sql`: initial schema migration.
+  - `drizzle/meta/`: Drizzle migration snapshots and journal.
+
+- `emails/`: React email templates.
+  - `emails/welcome.tsx`: signup welcome email.
+  - `emails/purchase-confirmation.tsx`: credit purchase confirmation.
+  - `emails/job-ready.tsx`: job completion email.
+
+- `scripts/`: local operational scripts.
+  - `scripts/check-integrations.mjs`: non-destructive integration checks for env/services. It loads `.env.local` and tests DB, Supabase, Redis, Stripe, OpenAI, Resend, and FAL key presence.
+
+## 4. Variables de entorno
+
+From `.env.example`:
+
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL. Used by browser/server Supabase clients.
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase publishable/anon key. Used client-side and server-side for auth operations.
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key. Used server-side for privileged Storage operations and admin client access.
+- `DATABASE_URL`: Postgres connection string for Drizzle. Used in `lib/db/index.ts` and `drizzle.config.ts`. Values are normalized to tolerate accidental wrapping quotes.
+- `INNGEST_EVENT_KEY`: event key for sending events to Inngest.
+- `INNGEST_SIGNING_KEY`: signing key for the `/api/inngest` endpoint.
+- `STRIPE_SECRET_KEY`: Stripe server secret key used by checkout, portal, and webhook handlers.
+- `STRIPE_WEBHOOK_SECRET`: Stripe webhook signing secret for `app/api/stripe/webhook/route.ts`.
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`: Stripe publishable key. Present for frontend usage; current checkout implementation is server-side and does not yet use embedded Stripe Elements.
+- `STRIPE_PRICE_ID_CREDITS_10`: Stripe Price ID for the 10-credit one-time product.
+- `STRIPE_PRICE_ID_CREDITS_50`: Stripe Price ID for the 50-credit one-time product.
+- `STRIPE_PRICE_ID_PRO_MONTHLY`: Stripe Price ID for the recurring Pro monthly plan.
+- `FAL_KEY`: fal.ai API key for image generation.
+- `OPENAI_API_KEY`: OpenAI API key for TTS generation.
+- `UPSTASH_REDIS_REST_URL`: Upstash Redis REST URL. Values are normalized to tolerate accidental wrapping quotes.
+- `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST token. Values are normalized to tolerate accidental wrapping quotes.
+- `RESEND_API_KEY`: Resend API key. Optional operationally; email failures are non-blocking.
+- `RESEND_FROM_EMAIL`: sender email for Resend. Must be a verified domain sender in Resend; Gmail addresses are rejected.
+- `NEXT_PUBLIC_APP_URL`: canonical public app URL, used by metadata, Stripe success/cancel URLs, sitemap, and robots.
+- `HEALTHCHECK_SECRET`: bearer token required by `/api/health` in production.
+- `FREE_SIGNUP_CREDITS`: credits granted when a user profile is created for the first time.
+- `FREE_MONTHLY_CREDITS`: displayed/used as Free plan monthly credit metadata.
+- `PRO_MONTHLY_CREDITS`: credits granted on `invoice.paid` for a Pro subscription.
+- `MAX_CONCURRENT_JOBS`: per-user active job concurrency limit enforced through Upstash Redis.
+- `SUPABASE_STORAGE_BUCKET`: Supabase Storage bucket for generated files; currently `ai-results`. The bucket should be private.
+
+## 5. Modelo de datos
+
+Schema source: `lib/db/schema.ts`.
+
+- `users`
+  - `id`: internal app UUID primary key.
+  - `authUserId`: Supabase Auth user id. Unique link to `auth.users`.
+  - `email`: user email.
+  - `fullName`: optional display name from auth metadata.
+  - `stripeCustomerId`: optional Stripe customer id, set during checkout/portal flows.
+  - `createdAt`, `updatedAt`: timestamps.
+
+- `credits`
+  - `id`: UUID primary key.
+  - `userId`: unique FK to `users.id`. One credit balance row per user.
+  - `balance`: current credit balance.
+  - `updatedAt`: last balance update.
+
+- `subscriptions`
+  - `id`: UUID primary key.
+  - `userId`: FK to `users.id`.
+  - `plan`: plan identifier, currently `free` or `pro`.
+  - `status`: Stripe/subscription status or `active` for free.
+  - `stripeSubscriptionId`: unique Stripe subscription id.
+  - `currentPeriodStart`, `currentPeriodEnd`: Stripe billing period.
+  - `cancelAtPeriodEnd`: Stripe cancellation flag.
+  - `createdAt`, `updatedAt`: timestamps.
+
+- `jobs`
+  - `id`: UUID primary key.
+  - `userId`: FK to `users.id`.
+  - `type`: enum `image` or `tts`.
+  - `status`: enum `pending`, `processing`, `done`, `failed`.
+  - `input`: JSON input payload. For image it stores `{ prompt }`; for TTS it stores `{ text, voice }`.
+  - `resultUrl`: private Supabase Storage object path when done. Older rows may contain legacy public URLs; `lib/ai/storage.ts` tolerates both shapes.
+  - `error`: failure reason when failed.
+  - `creditsUsed`: number of credits debited for the job.
+  - `createdAt`, `updatedAt`: timestamps.
+
+- `transactions`
+  - `id`: UUID primary key.
+  - `userId`: FK to `users.id`.
+  - `type`: enum `credit_purchase`, `subscription_payment`, `credit_spend`, `credit_refund`, `signup_bonus`.
+  - `credits`: credit amount added/refunded/recorded. Spends are stored as negative values.
+  - `amountCents`: Stripe amount for paid transactions when available.
+  - `stripeEventId`: unique idempotency key. Stripe events use the Stripe event id; job refunds use `job_refund:${jobId}`.
+  - `metadata`: JSON metadata such as job id, checkout session id, subscription id, source.
+  - `createdAt`: timestamp.
+
+Relations:
+- `users` has one `credits`.
+- `users` has many `jobs`.
+- `users` has many `subscriptions`.
+- `users` has many `transactions`.
+
+RLS:
+- SQL policies live in `lib/db/rls.sql`.
+- Users can read only their own rows via Supabase `auth.uid()` mapped through `users.auth_user_id`.
+- Server-side writes use service/server credentials and Drizzle.
+
+## 6. Flujo de autenticación
+
+- Login UI: `app/(auth)/login/page.tsx` renders `components/auth/login-form.tsx`.
+- Magic link:
+  - Client calls `supabase.auth.signInWithOtp()` in `components/auth/login-form.tsx`.
+  - Supabase sends the email.
+  - The email returns to `app/(auth)/callback/route.ts`.
+  - Callback exchanges the `code` with `supabase.auth.exchangeCodeForSession(code)`.
+  - Callback creates app profile through `ensureUserProfile()` and redirects to `/dashboard`.
+
+- Google OAuth:
+  - Button sends the browser to `/login/google`.
+  - `app/(auth)/login/google/route.ts` starts OAuth server-side with Supabase so the PKCE verifier is stored in cookies.
+  - Supabase redirects through Google and back to `/callback`.
+  - The callback completes the session and profile setup.
+
+- Logout:
+  - Dashboard posts to `app/(auth)/logout/route.ts`.
+  - It calls `supabase.auth.signOut()` and redirects to `/login` with HTTP 303.
+
+- Session/cookies:
+  - Supabase cookies are set with `path: "/"` in server, browser, callback, middleware, and Google login route.
+  - `lib/supabase/middleware.ts` refreshes auth cookies through `createServerClient()`.
+
+- Protected routes:
+  - `proxy.ts` applies `updateSession()` to:
+    - `/dashboard/:path*`
+    - `/login`
+    - `/api/jobs/:path*`
+  - If no user exists and the path starts with `/dashboard`, it redirects to `/login`.
+  - API job routes also independently validate auth server-side.
+
+## 7. Sistema de créditos
+
+- Initial credits:
+  - `ensureUserProfile()` in `lib/db/queries.ts` creates a profile on first login.
+  - It inserts a `credits` row with `FREE_SIGNUP_CREDITS`.
+  - It inserts a free `subscriptions` row.
+  - It inserts a `signup_bonus` transaction.
+
+- Debit before execution:
+  - `app/api/jobs/create/route.ts` calls `createPendingJob()`.
+  - `createPendingJob()` runs a DB transaction:
+    - Locks/selects the `credits` row with enough balance.
+    - Throws `INSUFFICIENT_CREDITS` if balance is too low.
+    - Decrements balance.
+    - Inserts a `credit_spend` transaction with a negative amount.
+    - Inserts `jobs` row with `status = pending`.
+
+- Refund on failure:
+  - `runAiJob` in `lib/inngest/functions.ts` catches worker errors.
+  - It calls `refundJobCredits(job.id, reason)`.
+  - `refundJobCredits()` increments credit balance once, inserts an idempotent `credit_refund` transaction, and marks the job `failed`.
+
+- Stripe credit additions:
+  - `app/api/stripe/webhook/route.ts` handles `checkout.session.completed` for one-time credit packs.
+  - It calls `addCredits()` in `lib/db/queries.ts`.
+  - `addCredits()` inserts the transaction first and only increments balance if the transaction is new.
+
+- Subscription credits:
+  - `invoice.paid` webhooks retrieve the subscription and add `PRO_MONTHLY_CREDITS`.
+  - Subscription rows are inserted or updated with Stripe period/status data.
+
+- Rate/concurrency:
+  - `reserveJobSlot()` and `releaseJobSlot()` live in `lib/redis/rate-limit.ts`.
+  - Active count key is `jobs:active:${userId}`.
+  - Release deletes the Redis key if the count reaches zero or below to avoid negative counters.
+  - Limit is `MAX_CONCURRENT_JOBS`.
+
+## 8. Cómo agregar un nuevo proveedor de AI
+
+1. Add a new job type in `lib/db/schema.ts`.
+   - Extend `jobTypeEnum`, for example:
+     ```ts
+     export const jobTypeEnum = pgEnum("job_type", ["image", "tts", "video"]);
+     ```
+
+2. Generate and apply a Drizzle migration.
+   ```bash
+   npm run db:generate
+   npm run db:migrate
+   ```
+
+3. Add input typing in `lib/ai/types.ts`.
+   - Define the input shape.
+   - Extend `AiInput` if needed.
+   - Ensure `AiResult` can represent the output. If the new provider returns another file type, extend `extension`.
+
+4. Create a provider adapter in `lib/ai/providers/`.
+   - Follow `lib/ai/providers/fal.ts` or `lib/ai/providers/openai-tts.ts`.
+   - Implement:
+     ```ts
+     export const myProvider: AiProvider<MyInput> = {
+       type: "video",
+       costCredits: 5,
+       async generate(input) {
+         return {
+           bytes,
+           contentType,
+           extension
+         };
+       }
+     };
+     ```
+
+5. Register the provider in `lib/ai/providers/index.ts`.
+   - Add it to the `providers` object.
+
+6. Add request validation in `lib/ai/validation.ts`.
+   - Extend `createJobSchema` discriminated union with the new `type` and input schema.
+
+7. Update UI in `components/dashboard/job-create-form.tsx`.
+   - Add controls for the new job type and build the correct request payload.
+
+8. Update result rendering in `components/dashboard/job-history.tsx`.
+   - Render the new output type: image, audio, video, document, etc.
+
+9. Set provider env vars.
+   - Add to `.env.example`.
+   - Add to Vercel Project Settings.
+   - Update `scripts/check-integrations.mjs` if the provider supports a non-destructive check.
+
+10. Test the full path.
+   - Create job.
+   - Confirm credit debit.
+   - Confirm Inngest execution.
+   - Confirm Storage upload.
+   - Confirm result rendering.
+   - Confirm refund behavior on forced failure.
+
+## 9. Estado actual
+
+Implemented and tested:
+- Next.js production deploy on Vercel.
+- Supabase Auth login with Google/magic-link callback infrastructure.
+- Auth-protected dashboard.
+- Production health endpoint at `/api/health`, protected by `HEALTHCHECK_SECRET` in production.
+- Supabase Postgres tables and RLS SQL.
+- First-login profile creation and signup credits.
+- Credit balance display.
+- Async image generation pipeline using fal.ai.
+- Async TTS pipeline using OpenAI TTS.
+- Inngest worker endpoint and job function.
+- Upstash Redis concurrency reservation.
+- Private Supabase Storage upload to `ai-results` with authenticated signed result URLs.
+- Dashboard auto-refresh while jobs are `pending` or `processing`.
+- Job history with preview, view, download, and audio player.
+- Logout.
+- Pricing page with pack/plan selection before Stripe Checkout.
+- Stripe Checkout routes using HTTP 303 redirects after POST.
+- Stripe webhook route for credit purchase, subscription payment, and subscription deletion.
+- Stripe credit grants are idempotent by event id.
+- Stripe customer portal route.
+- Resend email templates and send helpers, with failures made non-blocking.
+- Vercel env quote issues mitigated for `DATABASE_URL` and Upstash vars.
+- Job spends are tracked as `credit_spend` transactions.
+- Job refunds are idempotent.
+- `/api/auth/session` debug endpoint has been removed.
+
+Current local unpushed change:
+- `lib/stripe/pricing.ts` has visible test prices changed to:
+  - 10 credits: `$1`
+  - 50 credits: `$2`
+  - Pro monthly: `$3`
+- This is not committed/pushed at the time this file was generated.
+
+Known placeholders or pending pieces:
+- `STRIPE_WEBHOOK_SECRET` must be set per deployment environment for real Stripe webhook processing.
+- `HEALTHCHECK_SECRET` should be set in production if `/api/health` is used.
+- Resend requires a verified sender domain. `gmail.com` senders are rejected by Resend.
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is configured but not used by embedded Stripe UI; current flow uses external Stripe Checkout.
+- There is no embedded Stripe checkout.
+- There is no admin UI.
+- There are no automated tests yet.
+- There is no realtime job subscription; dashboard currently uses polling/refresh.
+- Error messages are functional but not polished product UX.
+- Google OAuth setup depends on external Google Cloud and Supabase provider configuration.
+
+## 10. Próximos pasos sugeridos
+
+1. Finish Stripe end-to-end.
+   - Set `STRIPE_WEBHOOK_SECRET` in Vercel.
+   - Run a test purchase.
+   - Confirm credits are added through webhook.
+   - Confirm `transactions` table gets the Stripe event id.
+   - Confirm duplicate webhook events do not duplicate credits.
+
+2. Clean production env vars.
+   - Remove wrapping quotes from Vercel env values.
+   - Rotate all secrets that were pasted into chat or exposed during setup.
+
+3. Replace Resend sender.
+   - Verify a real domain in Resend.
+   - Set `RESEND_FROM_EMAIL` to something like `Product <noreply@yourdomain.com>`.
+   - Keep email failures non-blocking.
+
+4. Improve pricing model.
+   - Decide final products/prices.
+   - Add `STRIPE_PRICE_ID_CREDITS_100` if a 100-credit pack returns.
+   - Keep UI prices in `lib/stripe/pricing.ts` synchronized with Stripe.
+
+6. Improve job UX.
+   - Add better loading states and status labels.
+   - Add retry button for failed jobs.
+   - Add filters or tabs for image/TTS/history.
+   - Consider Supabase Realtime or SWR/TanStack Query instead of `router.refresh()` polling.
+
+7. Add tests.
+   - Unit test credit debit/refund logic in `lib/db/queries.ts`.
+   - Integration test job creation route behavior.
+   - Webhook tests with signed Stripe payloads.
+   - Basic Playwright smoke test for login/dashboard where feasible.
+
+8. Harden security.
+   - Review RLS policies after final data model.
+   - Protect or remove diagnostic endpoints.
+   - Add rate limits to auth-sensitive and billing endpoints if needed.
+   - Verify service role key is never exposed client-side.
+
+9. Productize the UI.
+   - Replace boilerplate marketing copy.
+   - Add proper app name/branding.
+   - Improve dashboard layout for mobile.
+   - Add account/settings page.
+
+10. Operationalize deployment.
+   - Document Vercel env setup per environment.
+   - Document Inngest sync/deploy process.
+   - Add monitoring/logging strategy for failed jobs and webhook failures.
