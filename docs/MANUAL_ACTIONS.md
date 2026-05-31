@@ -44,6 +44,37 @@ https://YOUR-SUPABASE-PROJECT.supabase.co/auth/v1/callback
 3. Add that URL in Google Cloud Console as an authorized redirect URI for the Web OAuth client.
 4. Paste the Google Client ID and Client Secret into Supabase.
 
+## Vercel Production Environment Variables
+
+Configure these in Vercel Dashboard > getfluent-ai > Settings > Environment Variables.
+
+Minimum required for production login:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+DATABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+NEXT_PUBLIC_APP_URL=https://getfluent-ai.vercel.app
+FREE_SIGNUP_CREDITS=5
+```
+
+Recommended for email:
+
+```text
+RESEND_API_KEY
+RESEND_FROM_EMAIL
+```
+
+Required later for Fluent conversation:
+
+```text
+ANTHROPIC_API_KEY
+ELEVENLABS_API_KEY
+```
+
+After adding or changing any `NEXT_PUBLIC_*` variable, redeploy production. Next.js inlines public environment variables into the browser bundle at build time.
+
 ## Supabase SQL
 
 Status: base RLS was applied automatically on 2026-05-31.
