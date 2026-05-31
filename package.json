@@ -1,5 +1,5 @@
 {
-  "name": "ai-saas-boilerplate",
+  "name": "fluent",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,6 +13,7 @@
     "inngest": "inngest-cli dev -u http://localhost:3000/api/inngest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@fal-ai/client": "^1.6.2",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-slot": "^1.2.0",
