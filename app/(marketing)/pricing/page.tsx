@@ -12,7 +12,7 @@ export default function PricingPage() {
         <div>
           <h1 className="text-4xl font-semibold">Pricing</h1>
           <p className="mt-3 max-w-2xl text-muted-foreground">
-            Sell monthly plans and non-expiring credit packs at the same time.
+            Practice English with flexible credit packs or a monthly Pro plan.
           </p>
         </div>
         <Button asChild variant="outline">
@@ -52,15 +52,15 @@ export default function PricingPage() {
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         {CREDIT_PACKS.map((pack) => (
           <section key={pack.id} className="rounded-lg border bg-card p-6">
-            <h3 className="text-xl font-semibold">{pack.credits} credits</h3>
+            <h3 className="text-xl font-semibold">{pack.name}</h3>
             <p className="mt-2 text-3xl font-semibold">${pack.price}</p>
-            <p className="mt-3 text-sm text-muted-foreground">Credits do not expire.</p>
+            <p className="mt-3 text-sm text-muted-foreground">{pack.credits} practice credits that do not expire.</p>
             <form action="/api/stripe/checkout" method="post" className="mt-6">
               <input type="hidden" name="mode" value="credits" />
               <input type="hidden" name="packId" value={pack.id} />
               <Button type="submit" className="w-full">
                 <Wallet className="h-4 w-4" />
-                Buy {pack.credits} credits
+                Buy pack
               </Button>
             </form>
           </section>

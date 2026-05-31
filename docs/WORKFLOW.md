@@ -28,6 +28,7 @@ This folder is the handoff area for setup notes, manual dashboard actions, and S
 - 2026-05-31: `npm run build` passed.
 - 2026-05-31: Local `/login` returned HTTP 200.
 - 2026-05-31: Local `/login/google` returned HTTP 307 to Supabase Google OAuth with callback `http://localhost:3000/callback`.
+- 2026-05-31: Stripe test keys and Price IDs were verified. Test Checkout Sessions were created for a one-time pack and monthly subscription.
 
 ## Pending Credentials
 
@@ -35,4 +36,4 @@ These are not required for basic auth verification but are needed for later prod
 
 - `ANTHROPIC_API_KEY` for Fluent conversation AI.
 - `ELEVENLABS_API_KEY` for Fluent voice output.
-- Stripe, Inngest, and Upstash variables if billing, background jobs, and concurrency from the base remain enabled.
+- Inngest and Upstash variables if background jobs and concurrency from the base remain enabled.
