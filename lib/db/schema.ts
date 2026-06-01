@@ -85,3 +85,54 @@ export type User = typeof users.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type JobType = typeof jobTypeEnum.enumValues[number];
 export type JobStatus = typeof jobStatusEnum.enumValues[number];
+
+export const englishLevelEnum = pgEnum("english_level", ["A1", "A2", "B1", "B2", "C1", "C2"]);
+export const nativeLanguageEnum = pgEnum("native_language", [
+  "spanish",
+  "portuguese",
+  "french",
+  "italian",
+  "german",
+  "other"
+]);
+export const sessionStatusEnum = pgEnum("session_status", ["setup", "active", "completed", "analyzed"]);
+
+export const userLanguageProfiles = pgTable("user_language_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // References users.id.
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull().unique(),
+  nativeLanguage: nativeLanguageEnum("native_language").default("spanish").notNull(),
+  englishLevel: englishLevelEnum("english_level").default("A1").notNull(),
+  interests: jsonb("interests").$type<string[]>().default(sql`'[]'::jsonb`).notNull(),
+  preferredTopics: jsonb("preferred_topics").$type<string[]>().default(sql`'[]'::jsonb`).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export type ConversationTurn = {
+  role: "assistant" | "user";
+  content: string;
+  audioUrl?: string;
+  timestamp: string;
+};
+
+export const conversationSessions = pgTable("conversation_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  status: sessionStatusEnum("status").default("setup").notNull(),
+  englishLevel: englishLevelEnum("english_level").notNull(),
+  topic: text("topic").notNull(),
+  targetTurns: integer("target_turns").default(10).notNull(),
+  completedTurns: integer("completed_turns").default(0).notNull(),
+  turns: jsonb("turns").$type<ConversationTurn[]>().default(sql`'[]'::jsonb`).notNull(),
+  transcript: text("transcript"),
+  creditsUsed: integer("credits_used").default(0).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export type UserLanguageProfile = typeof userLanguageProfiles.$inferSelect;
+export type ConversationSession = typeof conversationSessions.$inferSelect;
+export type EnglishLevel = typeof englishLevelEnum.enumValues[number];
+export type NativeLanguage = typeof nativeLanguageEnum.enumValues[number];
+export type SessionStatus = typeof sessionStatusEnum.enumValues[number];

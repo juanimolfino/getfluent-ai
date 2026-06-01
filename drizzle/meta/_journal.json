@@ -15,6 +15,13 @@
       "when": 1779868800000,
       "tag": "0001_add_credit_spend_transaction",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780278620068,
+      "tag": "0002_lovely_zodiak",
+      "breakpoints": true
     }
   ]
 }
