@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { CreditCard, LogOut, Wallet } from "lucide-react";
+import { CreditCard, LogOut, MessageCircle, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DashboardAutoRefresh } from "@/components/dashboard/dashboard-auto-refresh";
 import { JobCreateForm } from "@/components/dashboard/job-create-form";
@@ -30,6 +30,9 @@ export default async function DashboardPage() {
           <p className="mt-1 text-muted-foreground">{profile.email}</p>
         </div>
         <div className="flex gap-2">
+          <Button asChild>
+            <Link href="/practice"><MessageCircle className="h-4 w-4" /> Start practicing</Link>
+          </Button>
           <Button asChild variant="outline">
             <Link href="/pricing"><Wallet className="h-4 w-4" /> Buy credits</Link>
           </Button>
@@ -52,8 +55,22 @@ export default async function DashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">{dashboard.subscription?.status ?? "active"}</p>
         </div>
       </section>
-      <JobCreateForm />
-      <h2 className="mb-4 mt-8 text-2xl font-semibold">History</h2>
+      <section className="mb-8 rounded-lg border bg-white p-5">
+        <h2 className="text-2xl font-semibold">Practice with Alex</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Start a guided English conversation by choosing your level, interests, and topic. Voice replies are generated with ElevenLabs when available.
+        </p>
+        <Button asChild className="mt-5">
+          <Link href="/practice"><MessageCircle className="h-4 w-4" /> New conversation</Link>
+        </Button>
+      </section>
+      <details className="rounded-lg border bg-card p-5">
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Legacy AI job tools</summary>
+        <div className="mt-5">
+          <JobCreateForm />
+        </div>
+      </details>
+      <h2 className="mb-4 mt-8 text-2xl font-semibold">Generated job history</h2>
       <JobHistory jobs={dashboard.jobs} />
     </main>
   );

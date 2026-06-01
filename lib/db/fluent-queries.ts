@@ -16,9 +16,10 @@ type LanguageProfileInput = {
 };
 
 export async function getUserLanguageProfile(userId: string) {
-  return getDb().query.userLanguageProfiles.findFirst({
+  const profile = await getDb().query.userLanguageProfiles.findFirst({
     where: eq(userLanguageProfiles.userId, userId)
-  }) ?? null;
+  });
+  return profile ?? null;
 }
 
 export async function upsertUserLanguageProfile(userId: string, data: LanguageProfileInput) {

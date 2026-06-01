@@ -7,15 +7,15 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: {
-    default: "AI SaaS Boilerplate",
-    template: "%s | AI SaaS Boilerplate"
+    default: "Fluent",
+    template: "%s | Fluent"
   },
-  description: "Production-ready AI micro-SaaS starter with auth, billing, async AI jobs, credits, subscriptions, and SEO.",
+  description: "Practice English conversation with Alex, an adaptive AI speaking partner.",
   openGraph: {
-    title: "AI SaaS Boilerplate",
-    description: "Launch AI micro-SaaS products with the boring production pieces already wired.",
+    title: "Fluent",
+    description: "Practice natural English conversations with an adaptive AI speaking partner.",
     url: "/",
-    siteName: "AI SaaS Boilerplate",
+    siteName: "Fluent",
     type: "website"
   }
 };
