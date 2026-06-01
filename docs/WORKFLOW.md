@@ -30,6 +30,7 @@ This folder is the handoff area for setup notes, manual dashboard actions, and S
 - 2026-05-31: Local `/login/google` returned HTTP 307 to Supabase Google OAuth with callback `http://localhost:3000/callback`.
 - 2026-05-31: Stripe test keys and Price IDs were verified. Test Checkout Sessions were created for a one-time pack and monthly subscription.
 - 2026-05-31: Fluent language profile and conversation session tables were added, migrated to Supabase, and protected with RLS.
+- 2026-05-31: Anthropic key was verified with `claude-sonnet-4-6`. ElevenLabs key reached the API, but the default Rachel voice requires a paid plan or a permitted `ELEVENLABS_VOICE_ID`.
 
 ## Pending Credentials
 
