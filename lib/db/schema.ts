@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -48,7 +49,15 @@ export const subscriptions = pgTable("subscriptions", {
   cancelAtPeriodEnd: boolean("cancel_at_period_end").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-});
+}, (table) => [
+  index("subscriptions_premium_lookup_idx").on(
+    table.userId,
+    table.plan,
+    table.status,
+    table.currentPeriodEnd,
+    table.createdAt
+  )
+]);
 
 export const jobs = pgTable("jobs", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -127,6 +136,7 @@ export const conversationSessions = pgTable("conversation_sessions", {
   turns: jsonb("turns").$type<ConversationTurn[]>().default(sql`'[]'::jsonb`).notNull(),
   transcript: text("transcript"),
   creditsUsed: integer("credits_used").default(0).notNull(),
+  charactersUsed: integer("characters_used").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 });

@@ -1,0 +1,1 @@
+CREATE INDEX "subscriptions_premium_lookup_idx" ON "subscriptions" USING btree ("user_id","plan","status","current_period_end","created_at");

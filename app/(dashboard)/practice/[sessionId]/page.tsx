@@ -4,7 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { ConversationView } from "@/components/fluent/conversation-view";
 import { Button } from "@/components/ui/button";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { getConversationSession } from "@/lib/db/fluent-queries";
+import { isPremiumUser } from "@/lib/billing/tier";
+import { getSessionState } from "@/lib/conversation/session-state";
 
 export const metadata = { title: "Conversation" };
 
@@ -17,8 +18,9 @@ export default async function ConversationPage({ params }: ConversationPageProps
   if (!user) redirect("/login");
 
   const { sessionId } = await params;
-  const session = await getConversationSession(sessionId, user.id);
+  const session = await getSessionState(sessionId, user.id);
   if (!session) notFound();
+  const isPremium = await isPremiumUser(user.id);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
@@ -32,6 +34,7 @@ export default async function ConversationPage({ params }: ConversationPageProps
         targetTurns={session.targetTurns}
         completedTurns={session.completedTurns}
         isComplete={session.status === "completed" || session.status === "analyzed"}
+        isPremium={isPremium}
         initialTurns={session.turns}
       />
     </main>

@@ -5,11 +5,11 @@ export type TTSResult = {
 
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
-export async function textToSpeech(text: string): Promise<TTSResult> {
+export async function textToSpeech(text: string, options?: { voiceId?: string }): Promise<TTSResult> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY is required");
 
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
+  const voiceId = options?.voiceId ?? process.env.ELEVENLABS_VOICE_ID ?? DEFAULT_VOICE_ID;
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: "POST",
     headers: {

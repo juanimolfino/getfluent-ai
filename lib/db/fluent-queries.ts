@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   conversationSessions,
@@ -83,6 +83,14 @@ export async function getConversationSession(sessionId: string, userId: string) 
   return session;
 }
 
+export async function getConversationSessionById(sessionId: string) {
+  const session = await getDb().query.conversationSessions.findFirst({
+    where: eq(conversationSessions.id, sessionId)
+  });
+
+  return session ?? null;
+}
+
 export async function appendTurnToSession(sessionId: string, turn: ConversationTurn) {
   const session = await getDb().query.conversationSessions.findFirst({
     where: eq(conversationSessions.id, sessionId)
@@ -124,4 +132,25 @@ export async function getUserRecentSessions(userId: string, limit = 10) {
     orderBy: desc(conversationSessions.createdAt),
     limit
   });
+}
+
+export async function getUserMonthlyCharacterUsage(userId: string) {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const [result] = await getDb()
+    .select({
+      charactersUsed: sql<number>`coalesce(sum(${conversationSessions.charactersUsed}), 0)::int`
+    })
+    .from(conversationSessions)
+    .where(
+      and(
+        eq(conversationSessions.userId, userId),
+        gte(conversationSessions.createdAt, monthStart),
+        lt(conversationSessions.createdAt, nextMonthStart)
+      )
+    );
+
+  return result?.charactersUsed ?? 0;
 }

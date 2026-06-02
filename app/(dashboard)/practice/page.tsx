@@ -5,7 +5,8 @@ import { SetupForm } from "@/components/fluent/setup-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { getUserLanguageProfile, getUserRecentSessions } from "@/lib/db/fluent-queries";
+import { getRecentSessionStates } from "@/lib/conversation/session-state";
+import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
 
 export const metadata = { title: "Practice" };
 
@@ -15,7 +16,7 @@ export default async function PracticePage() {
 
   const [profile, sessions] = await Promise.all([
     getUserLanguageProfile(user.id),
-    getUserRecentSessions(user.id, 5)
+    getRecentSessionStates(user.id, 5)
   ]);
 
   return (

@@ -1,0 +1,1 @@
+ALTER TABLE "conversation_sessions" ADD COLUMN "characters_used" integer DEFAULT 0 NOT NULL;

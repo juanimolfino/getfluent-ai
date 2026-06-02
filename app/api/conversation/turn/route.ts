@@ -1,31 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
+import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
-import { textToSpeech } from "@/lib/conversation/elevenlabs";
-import {
-  appendTurnToSession,
-  completeConversationSession,
-  getConversationSession,
-  getUserLanguageProfile
-} from "@/lib/db/fluent-queries";
+import { getSessionState, markSessionComplete, saveAssistantTurn, saveUserTurn } from "@/lib/conversation/session-state";
+import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
 import type { ConversationTurn } from "@/lib/db/schema";
 
 const conversationTurnSchema = z.object({
   sessionId: z.string().uuid(),
   userText: z.string().min(1).max(2000)
 });
-
-async function getAudioBase64(text: string) {
-  try {
-    const audio = await textToSpeech(text);
-    return audio.audioBuffer.toString("base64");
-  } catch (error) {
-    console.warn("Conversation turn TTS skipped", error);
-    return null;
-  }
-}
 
 export async function POST(request: Request) {
   try {
@@ -38,7 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
-    const session = await getConversationSession(parsed.data.sessionId, user.id);
+    const session = await getSessionState(parsed.data.sessionId, user.id);
     if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
     if (session.status !== "active") {
       return NextResponse.json({ error: "Session is not active" }, { status: 400 });
@@ -49,7 +34,7 @@ export async function POST(request: Request) {
       content: parsed.data.userText,
       timestamp: new Date().toISOString()
     };
-    const updatedSession = await appendTurnToSession(session.id, userTurn);
+    const updatedSession = await saveUserTurn(session.id, userTurn);
     const isLastTurn = updatedSession.completedTurns >= updatedSession.targetTurns;
     const languageProfile = await getUserLanguageProfile(user.id);
 
@@ -68,7 +53,7 @@ export async function POST(request: Request) {
 
     const message = await getAnthropic().messages.create({
       model: CONVERSATION_MODEL,
-      max_tokens: 250,
+      max_tokens: CONVERSATION_MAX_TOKENS,
       system,
       messages
     });
@@ -79,12 +64,11 @@ export async function POST(request: Request) {
       content,
       timestamp: new Date().toISOString()
     };
-    const sessionWithAssistant = await appendTurnToSession(session.id, assistantTurn);
-    const completedSession = isLastTurn ? await completeConversationSession(session.id) : sessionWithAssistant;
-    const audioBase64 = await getAudioBase64(content);
+    const sessionWithAssistant = await saveAssistantTurn(session.id, assistantTurn);
+    const completedSession = isLastTurn ? await markSessionComplete(session.id) : sessionWithAssistant;
 
     return NextResponse.json({
-      turn: { ...assistantTurn, audioBase64 },
+      turn: assistantTurn,
       session: {
         completedTurns: completedSession.completedTurns,
         targetTurns: completedSession.targetTurns,

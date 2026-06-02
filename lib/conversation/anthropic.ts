@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 export const CONVERSATION_MODEL = "claude-sonnet-4-6";
+export const CONVERSATION_MAX_TOKENS = 150;
 
 let anthropic: Anthropic | null = null;
 
