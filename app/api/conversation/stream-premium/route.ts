@@ -33,6 +33,7 @@ type PremiumDoneEvent = {
   metrics: {
     timeToFirstTokenMs: number | null;
     timeToFirstAudioMs: number | null;
+    requestToBackendReadyMs: number | null;
     timeToStreamCompleteMs: number;
     chars: number;
   };
@@ -49,6 +50,7 @@ type PremiumStreamEvent =
   | { type: "audio"; chunk: string; seq: number }
   | { type: "timing"; chars: PremiumTimingChar[]; startMs: number }
   | { type: "audio_failed" }
+  | { type: "server_metrics"; requestToBackendReadyMs: number }
   | PremiumDoneEvent
   | { type: "error"; message: string };
 
@@ -265,6 +267,7 @@ export async function POST(request: Request) {
       ? [{ role: "user" as const, content: "[START CONVERSATION]" }]
       : toAnthropicMessages(updatedSession.turns);
     const messageChars = messages.reduce((total, message) => total + message.content.length, 0);
+    const requestToBackendReadyMs = Math.round(performance.now() - requestStartedAt);
     logPerfStep("build_prompt_messages", promptBuildStartedAt, requestStartedAt, {
       sessionId: updatedSession.id,
       systemChars: system.length,
@@ -382,6 +385,7 @@ export async function POST(request: Request) {
         }
 
         try {
+          emit({ type: "server_metrics", requestToBackendReadyMs });
           const elevenlabsOpenStartedAt = performance.now();
           elevenlabsOpenPromise = Promise.resolve()
             .then(() => createElevenLabsStream({
@@ -476,6 +480,7 @@ export async function POST(request: Request) {
             metrics: {
               timeToFirstTokenMs,
               timeToFirstAudioMs,
+              requestToBackendReadyMs,
               timeToStreamCompleteMs,
               chars
             }

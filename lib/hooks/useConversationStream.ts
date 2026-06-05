@@ -7,15 +7,25 @@ export type ConversationPhase = "idle" | "user_speaking" | "streaming" | "alex_s
 export type ServerTurnMetrics = {
   timeToFirstTokenMs: number | null;
   timeToFirstAudioMs?: number | null;
+  requestToBackendReadyMs?: number | null;
   timeToStreamCompleteMs: number;
   chars: number;
 };
 
 export type ClientTurnMetrics = {
   timeToFirstTokenClientMs: number | null;
+  timeToFirstAudioClientMs: number | null;
   timeToVoiceStartMs: number | null;
   timeToStreamCompleteClientMs: number | null;
   server?: ServerTurnMetrics;
+};
+
+export type VoiceStartedMetrics = {
+  timestamp: number;
+  timeToVoiceStartMs: number;
+  timeToFirstTokenClientMs: number | null;
+  timeToFirstAudioClientMs: number | null;
+  requestToBackendReadyMs: number | null;
 };
 
 type StreamDonePayload = {
@@ -37,6 +47,7 @@ type StreamEvent =
   | { type: "audio"; chunk: string; seq: number }
   | { type: "timing"; chars: StreamTimingChar[]; startMs: number }
   | { type: "audio_failed" }
+  | { type: "server_metrics"; requestToBackendReadyMs: number }
   | ({ type: "done" } & StreamDonePayload)
   | { type: "error"; message: string };
 
@@ -47,6 +58,8 @@ type UseConversationStreamOptions = {
   onAudio?: (chunk: string, seq: number) => void;
   onTiming?: (chars: StreamTimingChar[], startMs: number) => void;
   onAudioFailed?: () => void;
+  onRequestStarted?: (timestamp: number) => void;
+  onVoiceStarted?: (metrics: VoiceStartedMetrics) => void;
   onComplete: (payload: StreamDonePayload) => void;
 };
 
@@ -57,6 +70,8 @@ export function useConversationStream({
   onAudio,
   onTiming,
   onAudioFailed,
+  onRequestStarted,
+  onVoiceStarted,
   onComplete
 }: UseConversationStreamOptions) {
   const [streamingText, setStreamingText] = useState("");
@@ -68,13 +83,17 @@ export function useConversationStream({
   const streamingTextRef = useRef("");
   const turnStartedAtRef = useRef<number | null>(null);
   const firstTokenClientMsRef = useRef<number | null>(null);
+  const firstAudioClientMsRef = useRef<number | null>(null);
   const voiceStartClientMsRef = useRef<number | null>(null);
   const streamCompleteClientMsRef = useRef<number | null>(null);
+  const requestToBackendReadyMsRef = useRef<number | null>(null);
   const callbacksRef = useRef({
     onTextDelta,
     onAudio,
     onTiming,
     onAudioFailed,
+    onRequestStarted,
+    onVoiceStarted,
     onComplete
   });
 
@@ -83,16 +102,27 @@ export function useConversationStream({
     onAudio,
     onTiming,
     onAudioFailed,
+    onRequestStarted,
+    onVoiceStarted,
     onComplete
   };
 
   const markVoiceStarted = useCallback(() => {
     if (turnStartedAtRef.current === null) return;
-    const timeToVoiceStartMs = Math.round(performance.now() - turnStartedAtRef.current);
+    const timestamp = performance.now();
+    const timeToVoiceStartMs = Math.round(timestamp - turnStartedAtRef.current);
     voiceStartClientMsRef.current = timeToVoiceStartMs;
+    callbacksRef.current.onVoiceStarted?.({
+      timestamp,
+      timeToVoiceStartMs,
+      timeToFirstTokenClientMs: firstTokenClientMsRef.current,
+      timeToFirstAudioClientMs: firstAudioClientMsRef.current,
+      requestToBackendReadyMs: requestToBackendReadyMsRef.current
+    });
     setLastTurnMetrics((current) => {
       const next = {
         timeToFirstTokenClientMs: current?.timeToFirstTokenClientMs ?? firstTokenClientMsRef.current,
+        timeToFirstAudioClientMs: current?.timeToFirstAudioClientMs ?? firstAudioClientMsRef.current,
         timeToVoiceStartMs,
         timeToStreamCompleteClientMs: current?.timeToStreamCompleteClientMs ?? streamCompleteClientMsRef.current,
         server: current?.server
@@ -106,10 +136,14 @@ export function useConversationStream({
 
   const sendTurn = useCallback(
     async (userText: string) => {
-      turnStartedAtRef.current = performance.now();
+      const requestStartedAt = performance.now();
+      turnStartedAtRef.current = requestStartedAt;
       firstTokenClientMsRef.current = null;
+      firstAudioClientMsRef.current = null;
       voiceStartClientMsRef.current = null;
       streamCompleteClientMsRef.current = null;
+      requestToBackendReadyMsRef.current = null;
+      callbacksRef.current.onRequestStarted?.(requestStartedAt);
       setIsStreaming(true);
       setPhase("streaming");
       setError(null);
@@ -152,6 +186,7 @@ export function useConversationStream({
             }
 
             if (event.type === "audio") {
+              firstAudioClientMsRef.current ??= Math.round(performance.now() - (turnStartedAtRef.current ?? performance.now()));
               callbacksRef.current.onAudio?.(event.chunk, event.seq);
             }
 
@@ -163,11 +198,16 @@ export function useConversationStream({
               callbacksRef.current.onAudioFailed?.();
             }
 
+            if (event.type === "server_metrics") {
+              requestToBackendReadyMsRef.current = event.requestToBackendReadyMs;
+            }
+
             if (event.type === "done") {
               streamCompleteClientMsRef.current = Math.round(performance.now() - (turnStartedAtRef.current ?? performance.now()));
               setSessionProgress({ completedTurns: event.completedTurns, targetTurns: event.targetTurns });
               setLastTurnMetrics((current) => ({
                 timeToFirstTokenClientMs: firstTokenClientMsRef.current,
+                timeToFirstAudioClientMs: firstAudioClientMsRef.current,
                 timeToVoiceStartMs: current?.timeToVoiceStartMs ?? voiceStartClientMsRef.current,
                 timeToStreamCompleteClientMs: streamCompleteClientMsRef.current,
                 server: event.metrics

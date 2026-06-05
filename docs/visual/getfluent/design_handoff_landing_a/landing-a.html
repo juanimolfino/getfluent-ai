@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GetFluent — Direction A</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  /* ============ Landing A — editorial, safe ============ */
+  .nav {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--paper) 82%, transparent);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid transparent; transition: border-color .3s;
+  }
+  .nav.scrolled { border-color: var(--line); }
+  .nav-in { display: flex; align-items: center; justify-content: space-between; height: 74px; }
+  .nav-links { display: flex; align-items: center; gap: 32px; }
+  .nav-links a { font-size: 15px; color: var(--ink-2); font-weight: 500; transition: color .2s; }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-cta { display: flex; align-items: center; gap: 10px; }
+  @media (max-width: 860px){ .nav-links { display: none; } }
+
+  /* hero */
+  .hero { padding: 74px 0 90px; position: relative; overflow: hidden; }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
+  .hero h1 { font-size: clamp(52px, 6.4vw, 88px); line-height: .98; margin: 22px 0 0; }
+  .hero h1 .it { font-style: italic; color: var(--lilac-ink); }
+  .hero .sub { font-size: 21px; line-height: 1.5; color: var(--ink-2); margin: 26px 0 0; max-width: 30ch; }
+  .hero-cta { display: flex; align-items: center; gap: 14px; margin-top: 34px; flex-wrap: wrap; }
+  .hero-note { display: flex; align-items: center; gap: 9px; margin-top: 20px; font-size: 14px; color: var(--ink-3); }
+  .hero-note b { color: var(--ink-2); font-weight: 600; }
+  @media (max-width: 920px){ .hero-grid { grid-template-columns: 1fr; gap: 40px; } .hero .sub { max-width: none; } }
+
+  /* decorative pastel blobs */
+  .blob { position: absolute; border-radius: 50%; filter: blur(46px); opacity: .55; z-index: 0; pointer-events: none; }
+  .blob.b1 { width: 360px; height: 360px; background: var(--lilac); top: -90px; right: -40px; }
+  .blob.b2 { width: 300px; height: 300px; background: var(--peach); bottom: -80px; left: 38%; opacity: .4; }
+
+  /* chat demo card */
+  .demo {
+    position: relative; z-index: 2;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+    padding: 20px; transform: rotate(.6deg);
+  }
+  .demo-head { display: flex; align-items: center; gap: 12px; padding: 4px 6px 16px; border-bottom: 1px solid var(--line); }
+  .demo-head .meta { line-height: 1.2; }
+  .demo-head .meta b { font-size: 15px; font-weight: 600; }
+  .demo-head .meta span { font-size: 12.5px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint-ink); box-shadow: 0 0 0 0 rgba(60,136,104,.5); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%{ box-shadow: 0 0 0 0 rgba(60,136,104,.4);} 70%{ box-shadow:0 0 0 8px rgba(60,136,104,0);} 100%{ box-shadow:0 0 0 0 rgba(60,136,104,0);} }
+  .demo-body { display: flex; flex-direction: column; gap: 12px; padding: 18px 4px; }
+  .bub { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 15px; line-height: 1.45; }
+  .bub.alex { align-self: flex-start; background: var(--paper-2); border-bottom-left-radius: 6px; }
+  .bub.user { align-self: flex-end; background: var(--lilac); color: var(--ink); border-bottom-right-radius: 6px; }
+  .bub.alex .play { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 12.5px; color: var(--lilac-ink); font-weight: 600; }
+  .demo-bar { display: flex; align-items: center; gap: 12px; padding: 12px 8px 6px; border-top: 1px solid var(--line); margin-top: 4px; }
+  .mic { width: 46px; height: 46px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; flex: none; }
+  .mic svg { width: 20px; height: 20px; }
+  .mic-eq { display: flex; align-items: center; gap: 4px; flex: 1; height: 30px; }
+  .mic-eq i { flex: 1; background: var(--line-2); border-radius: 100px; height: 30%; animation: eq 1s infinite var(--ease); }
+  .mic-eq i:nth-child(2n){ animation-delay: .2s; } .mic-eq i:nth-child(3n){ animation-delay: .4s; } .mic-eq i:nth-child(4n){ animation-delay: .1s; }
+  @keyframes eq { 0%,100%{ height: 22%; } 50%{ height: 90%; background: var(--lilac-ink); } }
+  .send-pill { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+
+  /* trust row */
+  .trust { padding: 8px 0 40px; }
+  .trust-in { display: flex; align-items: center; justify-content: center; gap: 14px 40px; flex-wrap: wrap; color: var(--ink-3); font-size: 14px; }
+  .trust-in .stars { color: var(--peach-ink); letter-spacing: 2px; }
+
+  /* section header */
+  .sec { padding: 96px 0; }
+  .sec-head { max-width: 660px; }
+  .sec-head h2 { font-size: clamp(36px, 4.4vw, 56px); line-height: 1.04; margin-top: 16px; }
+  .sec-head h2 .it { font-style: italic; }
+  .sec-head p { font-size: 19px; color: var(--ink-2); margin-top: 18px; }
+
+  /* how it works */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 56px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; position: relative; overflow: hidden; }
+  .step .num { font-family: 'Instrument Serif', serif; font-size: 60px; line-height: 1; color: var(--ink-3); opacity: .5; }
+  .step h3 { font-size: 21px; margin: 14px 0 8px; }
+  .step p { color: var(--ink-2); font-size: 15.5px; }
+  .step .tint { position: absolute; inset: auto -30px -30px auto; width: 120px; height: 120px; border-radius: 50%; filter: blur(30px); opacity: .5; }
+  @media (max-width: 820px){ .steps { grid-template-columns: 1fr; } }
+
+  /* who is it for */
+  .audience { background: var(--paper-2); }
+  .aud-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 52px; }
+  .aud { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; transition: transform .25s var(--ease), box-shadow .25s var(--ease); }
+  .aud:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+  .aud .ico { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 18px; }
+  .aud .ico svg { width: 23px; height: 23px; }
+  .aud h3 { font-size: 18px; margin-bottom: 6px; }
+  .aud p { font-size: 14.5px; color: var(--ink-2); }
+  @media (max-width: 900px){ .aud-grid { grid-template-columns: 1fr 1fr; } }
+
+  /* pricing compare */
+  .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 52px; }
+  .plan { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 34px; background: var(--card); }
+  .plan.pro { background: var(--ink); color: var(--paper); border-color: var(--ink); position: relative; }
+  .plan .pname { font-size: 15px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+  .plan.pro .pname { color: rgba(255,255,255,.6); }
+  .plan .price { font-family: 'Instrument Serif', serif; font-size: 64px; line-height: 1; margin: 14px 0 2px; }
+  .plan .per { font-size: 15px; color: var(--ink-3); }
+  .plan.pro .per { color: rgba(255,255,255,.55); }
+  .plan ul { list-style: none; margin: 26px 0 28px; padding: 0; display: flex; flex-direction: column; gap: 13px; }
+  .plan li { display: flex; gap: 11px; font-size: 15.5px; color: var(--ink-2); align-items: flex-start; }
+  .plan.pro li { color: rgba(255,255,255,.82); }
+  .plan li svg { width: 19px; height: 19px; flex: none; margin-top: 1px; color: var(--mint-ink); }
+  .plan.pro li svg { color: var(--lilac); }
+  .plan .badge { position: absolute; top: 24px; right: 26px; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 100px; background: var(--lilac); color: var(--lilac-ink); }
+  @media (max-width: 820px){ .plans { grid-template-columns: 1fr; } }
+
+  /* faq */
+  .faq { max-width: 800px; margin: 48px auto 0; }
+  .qa { border-bottom: 1px solid var(--line); }
+  .qa summary { list-style: none; cursor: pointer; padding: 24px 4px; display: flex; justify-content: space-between; align-items: center; gap: 20px; font-size: 19px; font-weight: 500; }
+  .qa summary::-webkit-details-marker { display: none; }
+  .qa .pm { width: 26px; height: 26px; flex: none; position: relative; transition: transform .3s var(--ease); }
+  .qa .pm::before, .qa .pm::after { content:''; position: absolute; background: var(--ink-2); border-radius: 2px; }
+  .qa .pm::before { top: 50%; left: 4px; right: 4px; height: 2px; transform: translateY(-50%); }
+  .qa .pm::after { left: 50%; top: 4px; bottom: 4px; width: 2px; transform: translateX(-50%); transition: opacity .3s; }
+  .qa[open] .pm::after { opacity: 0; }
+  .qa .ans { padding: 0 4px 24px; color: var(--ink-2); font-size: 16px; max-width: 64ch; }
+
+  /* final cta */
+  .final { padding: 110px 0; text-align: center; position: relative; overflow: hidden; }
+  .final h2 { font-size: clamp(44px, 6vw, 80px); line-height: 1; }
+  .final h2 .it { font-style: italic; color: var(--lilac-ink); }
+  .final p { font-size: 20px; color: var(--ink-2); margin: 22px auto 0; max-width: 44ch; }
+  .final .hero-cta { justify-content: center; }
+  .final .blob.b1 { top: 10%; left: -60px; }
+  .final .blob.b2 { bottom: 0; right: -40px; opacity: .45; }
+
+  .foot-in { display: flex; justify-content: space-between; gap: 30px; flex-wrap: wrap; }
+  .foot-cols { display: flex; gap: 56px; flex-wrap: wrap; }
+  .foot-col h4 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-bottom: 14px; }
+  .foot-col a { display: block; font-size: 15px; color: var(--ink-2); margin-bottom: 9px; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#top">
+      <svg class="mark" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="13" fill="url(#g)"/><path d="M8 13.5c1.4 1.6 3 2.4 5 2.4s3.6-.8 5-2.4" stroke="#3a2a55" stroke-width="1.7" stroke-linecap="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="26" y2="26"><stop stop-color="#E8DEF8"/><stop offset="1" stop-color="#FBE2D2"/></linearGradient></defs></svg>
+      GetFluent
+    </a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#who">Who it's for</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-cta">
+      <a href="app-login.html" class="btn btn-ghost btn-sm">Log in</a>
+      <a href="app-settings.html" class="btn btn-sm">Start free</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <!-- HERO -->
+  <section class="hero">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot"></span>Speak English, for real</span>
+        <h1 class="serif">Talk your way to <span class="it">fluent.</span></h1>
+        <p class="sub">Real spoken conversations with Alex — an AI that listens, replies in a natural voice, and adapts to your level. No classes, no judgment.</p>
+        <div class="hero-cta">
+          <a href="app-settings.html" class="btn btn-lg">Start a free conversation
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a href="#how" class="btn btn-ghost btn-lg">See how it works</a>
+        </div>
+        <div class="hero-note"><span class="live-dot"></span><b>No credit card.</b>&nbsp;Your first session is on us.</div>
+      </div>
+
+      <!-- chat demo -->
+      <div class="demo">
+        <div class="demo-head">
+          <div class="alex-orb" style="width:42px;height:42px"><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
+          <div class="meta">
+            <b>Alex</b>
+            <span><span class="live-dot"></span>Listening · B2 · Travel</span>
+          </div>
+        </div>
+        <div class="demo-body">
+          <div class="bub alex">So, where are you dreaming of traveling next?
+            <span class="play"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"/></svg>Play voice</span>
+          </div>
+          <div class="bub user">Maybe Japan! I want to practice before my trip.</div>
+          <div class="bub alex">Nice choice. What's the first thing you'd want to do when you land in Tokyo?
+            <span class="play"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M3 10v4h4l5 5V5L7 10H3z"/></svg>Play voice</span>
+          </div>
+        </div>
+        <div class="demo-bar">
+          <div class="mic"><svg viewBox="0 0 24 24" fill="none"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0014 0M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div class="mic-eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <span class="send-pill">Tap to send</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRUST -->
+  <section class="trust">
+    <div class="wrap trust-in">
+      <span><span class="stars">★★★★★</span> &nbsp;4.9 average from early learners</span>
+      <span>·</span>
+      <span>14,000+ conversations practiced</span>
+      <span>·</span>
+      <span>Speaks at A1 → C2</span>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="sec" id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow"><span class="dot"></span>How it works</span>
+        <h2 class="serif">Three steps to your <span class="it">first chat.</span></h2>
+        <p>Set it up once, then just talk. Alex handles the rest — pace, vocabulary, and the questions that keep you going.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="tint pastel-lilac"></div>
+          <div class="num">01</div>
+          <h3>Set your level &amp; topic</h3>
+          <p>Pick A1 to C2, your native language, and what you feel like talking about — travel, work, gaming, or a random spark.</p>
+        </div>
+        <div class="step">
+          <div class="tint pastel-peach"></div>
+          <div class="num">02</div>
+          <h3>Speak with Alex</h3>
+          <p>Talk out loud with your mic. Pause and resume anytime. Alex replies by voice and text, keeping the conversation alive.</p>
+        </div>
+        <div class="step">
+          <div class="tint pastel-sky"></div>
+          <div class="num">03</div>
+          <h3>See what to improve</h3>
+          <p>End the session and get a clear analysis — then practice again with exercises shaped around how you actually spoke.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHO IT'S FOR -->
+  <section class="sec audience" id="who">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow"><span class="dot"></span>Who it's for</span>
+        <h2 class="serif">Practice for the moment <span class="it">that matters.</span></h2>
+        <p>From the comfort of your home, rehearse the conversations you'll actually have — at your level, on your topics.</p>
+      </div>
+      <div class="aud-grid">
+        <div class="aud">
+          <div class="ico pastel-sky" style="color:var(--sky-ink)"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12l9-9 9 9M5 10v10h14V10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>Travelers</h3>
+          <p>Order, ask directions, and make small talk with confidence before you board.</p>
+        </div>
+        <div class="aud">
+          <div class="ico pastel-lilac" style="color:var(--lilac-ink)"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" stroke="currentColor" stroke-width="1.8"/></svg></div>
+          <h3>Interviews</h3>
+          <p>Rehearse tough questions out loud so the real interview feels like a rerun.</p>
+        </div>
+        <div class="aud">
+          <div class="ico pastel-peach" style="color:var(--peach-ink)"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5a1 1 0 011-1h11l4 4v11a1 1 0 01-1 1H5a1 1 0 01-1-1z" stroke="currentColor" stroke-width="1.8"/><path d="M8 9h6M8 13h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+          <h3>Students</h3>
+          <p>Turn classroom grammar into real speaking — the part textbooks never give you.</p>
+        </div>
+        <div class="aud">
+          <div class="ico pastel-mint" style="color:var(--mint-ink)"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+          <h3>Professionals</h3>
+          <p>Sharpen meeting, presentation, and email-call English on your own schedule.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="sec" id="pricing">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow"><span class="dot"></span>Pricing</span>
+        <h2 class="serif">Start free. Go <span class="it">Pro</span> when you're hooked.</h2>
+        <p>Try a full conversation for free. Upgrade for natural voice, translations, repeat audio, and end-of-session analysis.</p>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <div class="pname">Free</div>
+          <div class="price serif">$0</div>
+          <div class="per">to get started</div>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Full practice conversations</li>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Voice &amp; text with Alex</li>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Basic progress tracking</li>
+          </ul>
+          <a href="app-settings.html" class="btn btn-ghost" style="width:100%;justify-content:center">Start free</a>
+        </div>
+        <div class="plan pro">
+          <span class="badge">Most popular</span>
+          <div class="pname">Pro</div>
+          <div class="price serif">$9</div>
+          <div class="per">per month</div>
+          <ul>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Natural, human-like voice</li>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Translate &amp; replay any message</li>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>End-of-session analysis</li>
+            <li><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.7"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Longer sessions &amp; 100 credits/mo</li>
+          </ul>
+          <a href="app-pricing.html" class="btn btn-white" style="width:100%;justify-content:center">Upgrade to Pro</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="sec audience" id="faq">
+    <div class="wrap">
+      <div class="sec-head center" style="margin:0 auto">
+        <span class="eyebrow" style="justify-content:center;width:100%"><span class="dot"></span>FAQ</span>
+        <h2 class="serif">Questions, <span class="it">answered.</span></h2>
+      </div>
+      <div class="faq">
+        <details class="qa" open><summary>Do I need to speak out loud?<span class="pm"></span></summary><div class="ans">Yes — that's the point. You talk with your mic and Alex listens, just like a real conversation. You can also type if you're somewhere quiet, but speaking is where the fluency comes from.</div></details>
+        <details class="qa"><summary>What if I make mistakes or get stuck?<span class="pm"></span></summary><div class="ans">That's exactly what practice is for. Alex never judges — it keeps the conversation flowing with short, friendly questions, and you can pause and resume any time without losing what you said.</div></details>
+        <details class="qa"><summary>How does Alex match my level?<span class="pm"></span></summary><div class="ans">You set your level from A1 to C2, and Alex adapts its vocabulary, speaking speed, and the type of questions it asks. Beginners get gentle, simple turns; advanced learners get debate and native pace.</div></details>
+        <details class="qa"><summary>What's included in the free plan?<span class="pm"></span></summary><div class="ans">Full spoken conversations with Alex, in voice and text, plus basic progress tracking. Pro adds natural voice, one-tap translations, replay, and a detailed analysis at the end of each session.</div></details>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="final">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="wrap" style="position:relative;z-index:2">
+      <div class="alex-orb" style="width:80px;height:80px;margin:0 auto 28px"><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
+      <h2 class="serif">Your first conversation<br>is <span class="it">waiting.</span></h2>
+      <p>Speak English from the comfort of home — without the fear of getting it wrong.</p>
+      <div class="hero-cta">
+        <a href="app-settings.html" class="btn btn-lg">Start free with Alex
+          <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- FOOTER -->
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div style="max-width:280px">
+      <a class="logo" href="#top">
+        <svg class="mark" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="13" fill="url(#g2)"/><path d="M8 13.5c1.4 1.6 3 2.4 5 2.4s3.6-.8 5-2.4" stroke="#3a2a55" stroke-width="1.7" stroke-linecap="round"/><defs><linearGradient id="g2" x1="0" y1="0" x2="26" y2="26"><stop stop-color="#E8DEF8"/><stop offset="1" stop-color="#FBE2D2"/></linearGradient></defs></svg>
+        GetFluent
+      </a>
+      <p class="muted" style="font-size:15px;margin-top:14px">Speak English with Alex. Practice the conversations that matter, at your level.</p>
+    </div>
+    <div class="foot-cols">
+      <div class="foot-col"><h4>Product</h4><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="app-chat.html">The chat</a></div>
+      <div class="foot-col"><h4>Practice</h4><a href="#who">Travelers</a><a href="#who">Interviews</a><a href="#who">Students</a></div>
+      <div class="foot-col"><h4>Account</h4><a href="app-login.html">Log in</a><a href="app-settings.html">Start free</a></div>
+    </div>
+  </div>
+  <div class="wrap" style="margin-top:40px;font-size:13.5px;color:var(--ink-3)">© 2026 GetFluent · Made for people who'd rather talk than study.</div>
+</footer>
+
+<script>
+  const nav = document.getElementById('nav');
+  addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 12), { passive: true });
+  const io = new IntersectionObserver((es) => es.forEach(e => { if (e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} }), { threshold: .12 });
+  document.querySelectorAll('.step,.aud,.plan,.sec-head').forEach(el => { el.classList.add('reveal'); io.observe(el); });
+</script>
+</body>
+</html>

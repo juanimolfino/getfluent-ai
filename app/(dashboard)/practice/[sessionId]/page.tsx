@@ -35,6 +35,7 @@ export default async function ConversationPage({ params }: ConversationPageProps
         completedTurns={session.completedTurns}
         isComplete={session.status === "completed" || session.status === "analyzed"}
         isPremium={isPremium}
+        premiumSttProvider={process.env.NEXT_PUBLIC_PREMIUM_STT_PROVIDER}
         initialTurns={session.turns}
       />
     </main>

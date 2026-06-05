@@ -154,3 +154,24 @@ export async function getUserMonthlyCharacterUsage(userId: string) {
 
   return result?.charactersUsed ?? 0;
 }
+
+export async function getUserMonthlySttAudioMsUsage(userId: string) {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const [result] = await getDb()
+    .select({
+      sttAudioMsUsed: sql<number>`coalesce(sum(${conversationSessions.sttAudioMsUsed}), 0)::int`
+    })
+    .from(conversationSessions)
+    .where(
+      and(
+        eq(conversationSessions.userId, userId),
+        gte(conversationSessions.createdAt, monthStart),
+        lt(conversationSessions.createdAt, nextMonthStart)
+      )
+    );
+
+  return result?.sttAudioMsUsed ?? 0;
+}

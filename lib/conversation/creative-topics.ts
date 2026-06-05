@@ -1,0 +1,60 @@
+export const CREATIVE_CONVERSATION_TOPICS = [
+  "You wake up in 2050 and coffee is illegal",
+  "Plan a perfect weekend with only 20 dollars",
+  "Convince Alex that pineapple belongs on pizza",
+  "You can trade jobs with anyone for one day",
+  "A robot wants advice about making human friends",
+  "Design a tiny city for people who hate traffic",
+  "You find a secret room behind your kitchen",
+  "Explain your favorite hobby to someone from 1800",
+  "Create a new holiday that everyone should celebrate",
+  "You have to sell a useless invention on TV",
+  "The internet disappears for one week",
+  "A famous movie villain asks you for career advice",
+  "Plan a dinner party with three historical figures",
+  "Your pet suddenly becomes your boss",
+  "You can only eat food from one country for a year",
+  "Build a startup that solves a very small problem",
+  "You must teach English to an alien tourist",
+  "A time traveler asks you what year to visit",
+  "Choose one modern object to show ancient Rome",
+  "A city where nobody can use cars",
+  "You are the mayor of a town with strange rules",
+  "Create a school subject that should exist",
+  "Your phone starts giving life advice",
+  "You can erase one daily chore forever",
+  "A museum opens an exhibit about your normal Tuesday",
+  "You need to survive a day with no apps",
+  "Design the worst restaurant that somehow becomes popular",
+  "You get a message from your future self",
+  "Argue for or against working only four days a week",
+  "Create a sport for people who do not like sports",
+  "You can make one animal the president for a day",
+  "Plan a vacation without knowing the destination",
+  "You accidentally become famous for something silly",
+  "A magic elevator takes you to random countries",
+  "You must explain social media to your grandparents",
+  "Invent a new flavor of ice cream and sell it",
+  "You can ask one question to the whole world",
+  "A quiet library becomes the most exciting place in town",
+  "You need to organize a party for introverts",
+  "Your neighborhood gets a strange new law",
+  "You have to live inside a shopping mall for a week",
+  "A beginner chef opens a restaurant on the moon",
+  "You can bring back one old trend",
+  "Every person in the world gets the same dream",
+  "A company hires you to name impossible products",
+  "You find a suitcase full of letters from strangers",
+  "A normal bus ride turns into an adventure",
+  "You must choose three things to put in a time capsule",
+  "Create a reality show about learning English",
+  "You can make one boring thing exciting for everyone"
+] as const;
+
+export function pickCreativeConversationTopic(previousTopic?: string) {
+  let nextTopic = CREATIVE_CONVERSATION_TOPICS[Math.floor(Math.random() * CREATIVE_CONVERSATION_TOPICS.length)];
+  while (nextTopic === previousTopic) {
+    nextTopic = CREATIVE_CONVERSATION_TOPICS[Math.floor(Math.random() * CREATIVE_CONVERSATION_TOPICS.length)];
+  }
+  return nextTopic;
+}

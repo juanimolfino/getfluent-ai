@@ -88,3 +88,28 @@ export async function incrementCharactersUsed(sessionId: string, count: number):
   if (!updated) throw new Error("Conversation session not found");
   return updated.charactersUsed;
 }
+
+export async function incrementSttAudioMsUsed(sessionId: string, count: number): Promise<number> {
+  if (!Number.isInteger(count) || count < 0) throw new Error("incrementSttAudioMsUsed requires a non-negative integer");
+
+  if (count === 0) {
+    const session = await getDb().query.conversationSessions.findFirst({
+      where: eq(conversationSessions.id, sessionId),
+      columns: { sttAudioMsUsed: true }
+    });
+    if (!session) throw new Error("Conversation session not found");
+    return session.sttAudioMsUsed;
+  }
+
+  const [updated] = await getDb()
+    .update(conversationSessions)
+    .set({
+      sttAudioMsUsed: sql`${conversationSessions.sttAudioMsUsed} + ${count}`,
+      updatedAt: new Date()
+    })
+    .where(eq(conversationSessions.id, sessionId))
+    .returning({ sttAudioMsUsed: conversationSessions.sttAudioMsUsed });
+
+  if (!updated) throw new Error("Conversation session not found");
+  return updated.sttAudioMsUsed;
+}

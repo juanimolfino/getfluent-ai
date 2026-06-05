@@ -14,6 +14,7 @@ export type PremiumVoicePlayer = {
   stop: () => void;
   isSpeaking: () => boolean;
   onStart: (callback: () => void) => void;
+  onAudioStart: (callback: () => void) => void;
   onEnd: (callback: () => void) => void;
   onError: (callback: (error: Error) => void) => void;
   enqueueAudio: (base64Chunk: string, seq: number) => void;
@@ -34,6 +35,7 @@ export function createPremiumVoicePlayer(): PremiumVoicePlayer {
   let revealTimer: ReturnType<typeof requestAnimationFrame> | null = null;
   let timings: PremiumTimingChar[] = [];
   let onStartCallback: (() => void) | null = null;
+  let onAudioStartCallback: (() => void) | null = null;
   let onEndCallback: (() => void) | null = null;
   let onErrorCallback: ((error: Error) => void) | null = null;
   let onRevealCallback: ((text: string) => void) | null = null;
@@ -77,9 +79,10 @@ export function createPremiumVoicePlayer(): PremiumVoicePlayer {
     revealTimer = null;
   }
 
-  function resetQueue() {
-    audioQueue.stop();
-    audioQueue = createAudioQueue();
+  function wireQueueCallbacks() {
+    audioQueue.onStarted(() => {
+      onAudioStartCallback?.();
+    });
     audioQueue.onEnded(() => {
       speaking = false;
       cancelRevealTimer();
@@ -91,15 +94,13 @@ export function createPremiumVoicePlayer(): PremiumVoicePlayer {
     });
   }
 
-  audioQueue.onEnded(() => {
-    speaking = false;
-    cancelRevealTimer();
-    emitReveal(fullText);
-    onEndCallback?.();
-  });
-  audioQueue.onError((error) => {
-    onErrorCallback?.(error);
-  });
+  function resetQueue() {
+    audioQueue.stop();
+    audioQueue = createAudioQueue();
+    wireQueueCallbacks();
+  }
+
+  wireQueueCallbacks();
 
   return {
     speak(text: string) {
@@ -129,6 +130,9 @@ export function createPremiumVoicePlayer(): PremiumVoicePlayer {
     },
     onStart(callback: () => void) {
       onStartCallback = callback;
+    },
+    onAudioStart(callback: () => void) {
+      onAudioStartCallback = callback;
     },
     onEnd(callback: () => void) {
       onEndCallback = callback;

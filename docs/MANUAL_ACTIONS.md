@@ -73,6 +73,24 @@ ANTHROPIC_API_KEY
 ELEVENLABS_API_KEY
 ```
 
+Required for premium Deepgram voice input:
+
+```text
+DEEPGRAM_API_KEY
+DEEPGRAM_TEMP_TOKEN_TTL_SECONDS=30
+DEEPGRAM_FLUX_MODEL=flux-general-en
+DEEPGRAM_FLUX_EOT_THRESHOLD=0.9
+DEEPGRAM_FLUX_EOT_TIMEOUT_MS=10000
+NEXT_PUBLIC_PREMIUM_STT_PROVIDER=browser
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
+DEEPGRAM_TOKEN_GRANT_RATE_LIMIT_WINDOW_SECONDS=60
+DEEPGRAM_TOKEN_GRANTS_PER_USER_PER_WINDOW=12
+DEEPGRAM_TOKEN_GRANTS_PER_SESSION_PER_WINDOW=8
+```
+
+Use `NEXT_PUBLIC_PREMIUM_STT_PROVIDER=deepgram_flux` to enable Deepgram for premium users. Roll back by setting it to `browser` and redeploying.
+
 After adding or changing any `NEXT_PUBLIC_*` variable, redeploy production. Next.js inlines public environment variables into the browser bundle at build time.
 
 ## Supabase SQL
@@ -84,3 +102,11 @@ If RLS needs to be reapplied in a fresh database and Codex cannot apply it autom
 ```text
 lib/db/rls.sql
 ```
+
+Deepgram STT usage metrics require the latest Drizzle migration:
+
+```text
+npm run db:migrate
+```
+
+This adds `conversation_sessions.stt_audio_ms_used`.

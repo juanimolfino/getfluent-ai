@@ -137,6 +137,7 @@ export const conversationSessions = pgTable("conversation_sessions", {
   transcript: text("transcript"),
   creditsUsed: integer("credits_used").default(0).notNull(),
   charactersUsed: integer("characters_used").default(0).notNull(),
+  sttAudioMsUsed: integer("stt_audio_ms_used").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 });

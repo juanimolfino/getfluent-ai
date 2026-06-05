@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { pickCreativeConversationTopic } from "@/lib/conversation/creative-topics";
 import type { EnglishLevel, NativeLanguage, UserLanguageProfile } from "@/lib/db/schema";
 
 const LEVELS: { value: EnglishLevel; label: string; detail: string }[] = [
@@ -46,12 +47,20 @@ export function SetupForm({ profile }: SetupFormProps) {
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>(profile?.nativeLanguage ?? "spanish");
   const [topic, setTopic] = useState(profile?.preferredTopics[0] ?? "travel");
   const [customTopic, setCustomTopic] = useState("");
+  const [suggestedTopic, setSuggestedTopic] = useState<string | null>(null);
   const [interests, setInterests] = useState((profile?.interests?.length ? profile.interests : ["travel", "music"]).join(", "));
   const [targetTurns, setTargetTurns] = useState(8);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedTopic = useMemo(() => customTopic.trim() || topic, [customTopic, topic]);
+
+  function suggestCreativeTopic() {
+    const nextTopic = pickCreativeConversationTopic(suggestedTopic ?? selectedTopic);
+    setSuggestedTopic(nextTopic);
+    setTopic(nextTopic);
+    setCustomTopic(nextTopic);
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -166,6 +175,7 @@ export function SetupForm({ profile }: SetupFormProps) {
               onClick={() => {
                 setTopic(item);
                 setCustomTopic("");
+                setSuggestedTopic(null);
               }}
               className={`rounded-md border px-3 py-2 text-sm capitalize transition-colors ${
                 selectedTopic === item ? "border-primary bg-primary text-primary-foreground" : "bg-white hover:bg-muted"
@@ -175,10 +185,24 @@ export function SetupForm({ profile }: SetupFormProps) {
             </button>
           ))}
         </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button type="button" variant="outline" onClick={suggestCreativeTopic}>
+            {suggestedTopic ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+            {suggestedTopic ? "Try another" : "Give me a topic"}
+          </Button>
+          {suggestedTopic ? <p className="text-sm font-medium text-muted-foreground">{suggestedTopic}</p> : null}
+        </div>
         <div className="mt-4 grid gap-4 md:grid-cols-[1fr_180px]">
           <label className="space-y-2">
             <span className="text-sm font-medium">Custom topic</span>
-            <Input value={customTopic} onChange={(event) => setCustomTopic(event.target.value)} placeholder="job interviews, Argentina, product ideas" />
+            <Input
+              value={customTopic}
+              onChange={(event) => {
+                setCustomTopic(event.target.value);
+                setSuggestedTopic(null);
+              }}
+              placeholder="job interviews, Argentina, product ideas"
+            />
           </label>
           <label className="space-y-2">
             <span className="text-sm font-medium">User turns</span>

@@ -4,6 +4,7 @@ export type AudioQueue = {
   enqueue: (base64Chunk: string, seq: number) => void;
   start: () => void;
   stop: () => void;
+  onStarted: (cb: () => void) => void;
   onEnded: (cb: () => void) => void;
   onError: (cb: (error: Error) => void) => void;
   isPlaying: () => boolean;
@@ -37,6 +38,7 @@ function createNoopAudioQueue(): AudioQueue {
     enqueue() {},
     start() {},
     stop() {},
+    onStarted() {},
     onEnded() {},
     onError() {},
     isPlaying() {
@@ -58,6 +60,7 @@ function createMseAudioQueue(): AudioQueue {
   let playing = false;
   let appendedAnyChunk = false;
   let playbackStartedAt = 0;
+  let startCallback: (() => void) | null = null;
   let endCallback: (() => void) | null = null;
   let errorCallback: ((error: Error) => void) | null = null;
   let idleEndTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,7 +112,10 @@ function createMseAudioQueue(): AudioQueue {
     audio.preload = "auto";
     audio.addEventListener("playing", () => {
       playing = true;
-      playbackStartedAt ||= performance.now();
+      if (!playbackStartedAt) {
+        playbackStartedAt = performance.now();
+        startCallback?.();
+      }
     });
     audio.addEventListener("pause", () => {
       playing = false;
@@ -181,6 +187,9 @@ function createMseAudioQueue(): AudioQueue {
     onEnded(cb) {
       endCallback = cb;
     },
+    onStarted(cb) {
+      startCallback = cb;
+    },
     onError(cb) {
       errorCallback = cb;
     },
@@ -199,6 +208,8 @@ function createWebAudioQueue(): AudioQueue {
   let expectedSeq = 0;
   let nextStartTime = 0;
   let playbackStartedAt = 0;
+  let startTimer: ReturnType<typeof setTimeout> | null = null;
+  let startCallback: (() => void) | null = null;
   let playing = false;
   let draining = false;
   let endCallback: (() => void) | null = null;
@@ -231,7 +242,14 @@ function createWebAudioQueue(): AudioQueue {
         source.connect(context.destination);
 
         const startAt = Math.max(nextStartTime, context.currentTime + 0.02);
-        playbackStartedAt ||= performance.now() + Math.max(0, startAt - context.currentTime) * 1000;
+        if (!playbackStartedAt) {
+          const delayMs = Math.max(0, startAt - context.currentTime) * 1000;
+          playbackStartedAt = performance.now() + delayMs;
+          startTimer = setTimeout(() => {
+            startTimer = null;
+            if (playing) startCallback?.();
+          }, delayMs);
+        }
         source.start(startAt);
         nextStartTime = startAt + audioBuffer.duration;
         playing = true;
@@ -261,6 +279,10 @@ function createWebAudioQueue(): AudioQueue {
       void drain();
     },
     stop() {
+      if (startTimer) {
+        clearTimeout(startTimer);
+        startTimer = null;
+      }
       pendingChunks.clear();
       activeSources.forEach((source) => {
         try {
@@ -279,6 +301,9 @@ function createWebAudioQueue(): AudioQueue {
     },
     onEnded(cb) {
       endCallback = cb;
+    },
+    onStarted(cb) {
+      startCallback = cb;
     },
     onError(cb) {
       errorCallback = cb;

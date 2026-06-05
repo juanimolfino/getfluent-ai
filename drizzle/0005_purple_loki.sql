@@ -1,0 +1,1 @@
+ALTER TABLE "conversation_sessions" ADD COLUMN "stt_audio_ms_used" integer DEFAULT 0 NOT NULL;
