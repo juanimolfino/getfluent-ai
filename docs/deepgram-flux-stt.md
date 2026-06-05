@@ -9,11 +9,15 @@ Deepgram Flux is implemented as premium speech-to-text input only. Free users co
 Current flow:
 
 ```text
-Premium user taps Answer
--> browser starts local mic capture immediately
--> browser requests /api/stt/deepgram-token with sessionId
+Premium conversation becomes eligible for Deepgram input
+-> browser prefetches /api/stt/deepgram-token with sessionId before the user taps Answer
 -> server validates Supabase Auth, premium status, session ownership, Origin, and rate limit
 -> server returns a temporary Deepgram token and Flux WebSocket URL
+-> browser caches the temporary token in memory and refreshes it before expiry
+Premium user taps Answer
+-> browser starts local mic capture immediately
+-> browser consumes the prefetched token when available
+-> if no fresh token is available, browser requests /api/stt/deepgram-token as fallback
 -> browser connects directly to Deepgram with Sec-WebSocket-Protocol ["bearer", accessToken]
 -> Deepgram Update events update visible transcript only
 -> Deepgram EndOfTurn starts a local 2.2s grace window
@@ -213,7 +217,8 @@ Summary field meanings:
 - `endOfTurnLatencyMs`: turn start -> final transcript submission. This includes the whole speaking time, pauses, token/WS startup, and final waiting. It is not "time after the user stopped speaking".
 - `postSpeechSilenceMs`: last observed transcript change -> Deepgram `EndOfTurn`. This approximates the dead time after the last detected speech/content.
 - `eotToSubmitMs`: Deepgram `EndOfTurn` -> transcript submitted to the conversation flow. This should be close to the local 2.2s grace window unless the user manually sends.
-- `tokenFetchMs`, `wsOpenMs`, `firstUpdateLatencyMs`: startup and first transcript timing.
+- `tokenFetchMs`: time this turn waited for a token. With a ready prefetched token, this should be near `0ms`; if the prefetch is still in flight, this shows the remaining wait.
+- `wsOpenMs`, `firstUpdateLatencyMs`: WebSocket startup and first visible transcript timing.
 - `eotConfidence`: final Deepgram confidence at `EndOfTurn`.
 
 Raw per-update Deepgram confidence logs are disabled by default. Enable `NEXT_PUBLIC_STT_DEBUG_LOGS=true` locally if you need `[stt-debug]` lines for every `TurnInfo` update. Server-side intermediate STT metric logs are also quiet by default; enable `STT_DEBUG_LOGS=true` if you need every `[stt-metric]` event.
@@ -228,6 +233,63 @@ What to inspect when something feels slow:
 - High `requestToAudioChunk` with normal TTFT: ElevenLabs WebSocket/TTS latency or chunk buffering.
 - High `audioChunkToVoice`: browser playback queue, MSE/Web Audio startup, or premium audio player scheduling.
 - High `firstUpdateLatencyMs` in `[stt-summary]`: Deepgram token/WS readiness, audio buffering, network, or MediaRecorder behavior.
+
+## Performance Baseline
+
+Measured on June 5, 2026 during local/dev testing with premium `deepgram_flux`.
+
+Before token prefetch:
+
+```text
+tokenFetchMs=4025-9071
+wsOpenMs=779-1244
+firstUpdateLatencyMs=5858-11822
+```
+
+The user audio was captured immediately, but visible transcription waited for the token grant plus WebSocket open. In the slowest observed runs, the learner could speak for roughly 8 seconds before the first visible words appeared.
+
+After token prefetch:
+
+```text
+tokenFetchMs=38
+wsOpenMs=650
+firstUpdateLatencyMs=1913
+audioMs=10480
+postSpeechSilenceMs=1042
+eotToSubmitMs=2206
+endOfTurnLatencyMs=11221
+```
+
+Interpretation:
+
+- Token prefetch removed the main startup bottleneck. `tokenFetchMs` dropped from multi-second waits to `38ms`.
+- First visible transcript improved from roughly `5.9s-11.8s` to about `1.9s`.
+- The remaining first-text latency is mostly WebSocket open plus Deepgram's first `Update` timing after audio starts.
+- The turn still waits about `2.2s` after Deepgram `EndOfTurn` before submission because of `DEEPGRAM_FINAL_SEND_GRACE_MS=2200`.
+
+Related response-side values from the same post-prefetch run:
+
+```text
+sttEndToAudioMs=7803
+sttToRequest=2213
+requestToBackendReady=1254
+requestToTtft=4782
+requestToAudioChunk=5519
+audioChunkToVoice=72
+```
+
+Server-side perf from the same run:
+
+```text
+language_profile_load=501
+premium_check=504
+requestToBackendReady≈1254
+elevenlabs_ws_open=299
+claude_first_text_delta=2393 after backend stream call
+stream-premium total=6.8s
+```
+
+These response-side values do not affect when the user's transcript first appears, but they do affect how quickly Alex speaks after the learner finishes.
 
 ## Tuning
 
@@ -257,14 +319,15 @@ Adjustment guide:
 
 Observed local performance notes:
 
-- Deepgram token request can take multiple seconds locally.
+- Deepgram token request can take multiple seconds locally. The client now prefetches the token for premium Deepgram conversations so this should not block the first visible transcript when the prefetched token is ready.
 - The browser now captures audio immediately and buffers chunks while token and WebSocket connect.
 - Metrics POSTs can take around 2s locally because they validate auth/session and hit DB/Redis, but they are batched and fire-and-forget.
 - Do not optimize further until measuring after Vercel deploy near Supabase and Upstash.
 
 Potential later optimizations:
 
-- prefetch token when entering a premium conversation
+- pre-open the Deepgram WebSocket while Alex is speaking, then send audio immediately when the user taps Answer
+- reduce `DEEPGRAM_FINAL_SEND_GRACE_MS` from `2200ms` toward `1200-1500ms` if faster Alex response is more important than extra patience for learner pauses
 - reduce auth/session work in metrics route
 - sample non-critical metrics
 - cache premium/session validation briefly server-side

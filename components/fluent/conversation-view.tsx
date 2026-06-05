@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BarChart3, Languages, Loader2, Mic, Send, Square, Volume2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { createBrowserVoicePlayer, type VoicePlayer } from "@/lib/conversation/browser-voice";
-import { createDeepgramFluxSpeechProvider } from "@/lib/conversation/deepgram-flux-speech";
+import {
+  createDeepgramFluxSpeechProvider,
+  fetchDeepgramFluxToken,
+  type DeepgramFluxToken
+} from "@/lib/conversation/deepgram-flux-speech";
 import {
   buildAccumulatedDeepgramTranscript,
   upsertDeepgramTranscriptSegment
@@ -27,6 +30,8 @@ const START_CONVERSATION_TEXT = "[START_CONVERSATION]";
 const SILENCE_BEFORE_SEND_MS = 3000;
 const DEEPGRAM_FINAL_SEND_GRACE_MS = 2200;
 const DEEPGRAM_MAX_TURN_MS = 60000;
+const DEEPGRAM_PREFETCH_MIN_TOKEN_MS = 5000;
+const DEEPGRAM_PREFETCH_REFRESH_BEFORE_EXPIRY_MS = 8000;
 const STT_DEBUG_LOGS_ENABLED = process.env.NEXT_PUBLIC_STT_DEBUG_LOGS === "true";
 const VOICE_SPEEDS = [
   { label: "Slow", value: 0.7 },
@@ -126,6 +131,12 @@ type TranslationState = {
   status: "loading" | "ready" | "error";
   text?: string;
   showing: boolean;
+};
+
+type DeepgramPrefetchedTokenCache = {
+  token?: DeepgramFluxToken;
+  expiresAt?: number;
+  promise?: Promise<DeepgramFluxToken>;
 };
 
 let pendingSttMetrics: SttMetricClientPayload[] = [];
@@ -274,6 +285,10 @@ export function ConversationView({
   const deepgramTranscriptSegmentsRef = useRef<Map<number, string>>(new Map());
   const deepgramSegmentAudioMsRef = useRef<Map<number, number>>(new Map());
   const deepgramTurnSummaryRef = useRef<DeepgramTurnSummary>({});
+  const deepgramTokenCacheRef = useRef<DeepgramPrefetchedTokenCache>({});
+  const deepgramTokenRefreshTimerRef = useRef<number | null>(null);
+  const deepgramTokenPrefetchEligibleRef = useRef(false);
+  const warmDeepgramTokenRef = useRef<(() => Promise<DeepgramFluxToken> | undefined) | null>(null);
   const pendingDeepgramFinalMetricRef = useRef<{
     model?: string;
     transcriptChars: number;
@@ -712,6 +727,79 @@ export function ConversationView({
     deepgramMaxTurnTimerRef.current = null;
   }
 
+  function clearDeepgramTokenRefreshTimer() {
+    if (deepgramTokenRefreshTimerRef.current === null) return;
+    window.clearTimeout(deepgramTokenRefreshTimerRef.current);
+    deepgramTokenRefreshTimerRef.current = null;
+  }
+
+  function cacheDeepgramToken(token: DeepgramFluxToken) {
+    const expiresAt = performance.now() + token.expiresIn * 1000;
+    deepgramTokenCacheRef.current = { token, expiresAt };
+    clearDeepgramTokenRefreshTimer();
+
+    const refreshDelay = Math.max(0, expiresAt - performance.now() - DEEPGRAM_PREFETCH_REFRESH_BEFORE_EXPIRY_MS);
+    if (refreshDelay <= 0) return;
+
+    deepgramTokenRefreshTimerRef.current = window.setTimeout(() => {
+      deepgramTokenRefreshTimerRef.current = null;
+      deepgramTokenCacheRef.current = {};
+      warmDeepgramTokenRef.current?.();
+    }, refreshDelay);
+  }
+
+  const warmDeepgramToken = useCallback(() => {
+    if (!deepgramTokenPrefetchEligibleRef.current || !isDeepgramFluxInputSupported()) return undefined;
+
+    const cache = deepgramTokenCacheRef.current;
+    const now = performance.now();
+    if (cache.token && cache.expiresAt && cache.expiresAt - now > DEEPGRAM_PREFETCH_MIN_TOKEN_MS) return cache.promise;
+    if (cache.promise) return cache.promise;
+
+    clearDeepgramTokenRefreshTimer();
+    const promise = fetchDeepgramFluxToken({ sessionId })
+      .then((token) => {
+        if (deepgramTokenCacheRef.current.promise === promise) {
+          cacheDeepgramToken(token);
+        }
+        return token;
+      })
+      .catch((error) => {
+        if (deepgramTokenCacheRef.current.promise === promise) {
+          deepgramTokenCacheRef.current = {};
+        }
+        throw error;
+      });
+
+    deepgramTokenCacheRef.current = { promise };
+    void promise.catch(() => {});
+    return promise;
+  }, [sessionId]);
+  warmDeepgramTokenRef.current = warmDeepgramToken;
+
+  const consumeDeepgramPrefetchedToken = useCallback(() => {
+    const cache = deepgramTokenCacheRef.current;
+    const now = performance.now();
+
+    if (cache.token && cache.expiresAt && cache.expiresAt - now > DEEPGRAM_PREFETCH_MIN_TOKEN_MS) {
+      const token = cache.token;
+      deepgramTokenCacheRef.current = {};
+      clearDeepgramTokenRefreshTimer();
+      return Promise.resolve(token);
+    }
+
+    if (cache.promise) {
+      const promise = cache.promise;
+      deepgramTokenCacheRef.current = {};
+      clearDeepgramTokenRefreshTimer();
+      return promise;
+    }
+
+    deepgramTokenCacheRef.current = {};
+    clearDeepgramTokenRefreshTimer();
+    return undefined;
+  }, []);
+
   function postDeepgramEndOfTurnMetric(userText: string) {
     const metric = pendingDeepgramFinalMetricRef.current;
     const submittedAt = performance.now();
@@ -1031,8 +1119,10 @@ export function ConversationView({
       }, DEEPGRAM_FINAL_SEND_GRACE_MS);
     };
 
+    const prefetchedTokenPromise = consumeDeepgramPrefetchedToken();
     const provider = createDeepgramFluxSpeechProvider({
       sessionId,
+      prefetchedTokenPromise,
       onPartialTranscript: ({ transcript, turnIndex }) => {
         if (deepgramFinalSentRef.current) return;
         clearDeepgramFinalTimer();
@@ -1210,7 +1300,7 @@ export function ConversationView({
     } catch {
       fallbackToBrowserInput("deepgram_start_failed");
     }
-  }, [sessionId, setPhase, startBrowserListening, stopListening, submitUserText]);
+  }, [consumeDeepgramPrefetchedToken, sessionId, setPhase, startBrowserListening, stopListening, submitUserText]);
 
   const startListening = useCallback(() => {
     if (shouldAttemptDeepgramFluxInput({ isPremium, premiumSttProvider })) {
@@ -1226,6 +1316,29 @@ export function ConversationView({
     });
     startBrowserListening();
   }, [isPremium, premiumSttProvider, sessionId, startBrowserListening, startDeepgramListening]);
+
+  useEffect(() => {
+    deepgramTokenPrefetchEligibleRef.current =
+      shouldAttemptDeepgramFluxInput({ isPremium, premiumSttProvider }) &&
+      !progress.isComplete &&
+      phase !== "user_speaking" &&
+      phase !== "complete";
+
+    if (deepgramTokenPrefetchEligibleRef.current) {
+      warmDeepgramToken();
+    } else {
+      clearDeepgramTokenRefreshTimer();
+    }
+  }, [isPremium, phase, premiumSttProvider, progress.isComplete, warmDeepgramToken]);
+
+  useEffect(() => {
+    return () => {
+      deepgramTokenPrefetchEligibleRef.current = false;
+      warmDeepgramTokenRef.current = null;
+      deepgramTokenCacheRef.current = {};
+      clearDeepgramTokenRefreshTimer();
+    };
+  }, []);
 
   useEffect(() => {
     setSpeechSupported(isVoiceInputSupported(isPremium, premiumSttProvider));
@@ -1267,6 +1380,15 @@ export function ConversationView({
     browserPlayerRef.current?.setRate(voiceRate);
     premiumFallbackVoiceRef.current?.setRate(voiceRate);
   }, [voiceRate]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
+    textarea.scrollTop = textarea.scrollHeight;
+  }, [phase, text]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
@@ -1375,44 +1497,53 @@ export function ConversationView({
   const showThinkingBubble = isPremium ? isStreaming && !liveAssistantText : isStreaming && !streamingText;
   const showCompleteScreen = (phase === "complete" || progress.isComplete) && !premiumLiveBubbleActive;
 
+  const liveVoiceLabel = isPremium ? "Natural voice · English" : "Voice practice · English";
+  const isCompleted = phase === "complete" || progress.isComplete;
+  const progressPercent = Math.min(100, (progress.completedTurns / progress.targetTurns) * 100);
+
   return (
-    <div className="grid min-h-[calc(100vh-3rem)] gap-6 lg:grid-cols-[320px_1fr]">
-      <aside className="rounded-lg border bg-white p-5 lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)]">
-        <p className="text-sm font-medium text-muted-foreground">Practice session</p>
-        <h1 className="mt-2 text-3xl font-semibold capitalize">{topic}</h1>
-        <div className="mt-6 space-y-4 text-sm">
-          <div>
-            <p className="text-muted-foreground">Level</p>
-            <p className="mt-1 font-medium">{englishLevel}</p>
+    <div className="gf-page gf-chat">
+      <div className="shell">
+        {/* SIDEBAR */}
+        <aside className="aside">
+          <Link className="back" href="/practice">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+              <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Practice setup
+          </Link>
+          <div className="s-label">Practice session</div>
+          <div className="s-title serif" style={{ textTransform: "capitalize" }}>{topic}</div>
+
+          <div className="s-row">
+            <div className="k">Level</div>
+            <div className="v">{englishLevel}</div>
           </div>
-          <div>
-            <p className="text-muted-foreground">Progress</p>
-            <p className="mt-1 font-medium">
+          <div className="s-row">
+            <div className="k">Progress</div>
+            <div className="v">
               {progress.completedTurns} / {progress.targetTurns} user turns
-            </p>
-            <div className="mt-2 h-2 rounded-full bg-muted">
-              <div
-                className="h-2 rounded-full bg-primary"
-                style={{ width: `${Math.min(100, (progress.completedTurns / progress.targetTurns) * 100)}%` }}
-              />
+            </div>
+            <div className="bar">
+              <i style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
-          <div>
-            <p className="text-muted-foreground">Status</p>
-            <p className="mt-1 font-medium">{phase === "complete" || progress.isComplete ? "Completed" : "Active"}</p>
+          <div className="s-row">
+            <div className="k">Status</div>
+            <div className="v" style={isCompleted ? { color: "var(--gf-mint-ink)" } : undefined}>
+              {isCompleted ? "Completed" : "Active"}
+            </div>
           </div>
           {!isPremium ? (
-            <div>
-              <p className="text-muted-foreground">Voice speed</p>
-              <div className="mt-2 grid grid-cols-3 gap-2">
+            <div className="s-row">
+              <div className="k">Voice speed</div>
+              <div className="spd-grid">
                 {VOICE_SPEEDS.map((speed) => (
                   <button
                     key={speed.value}
                     type="button"
                     onClick={() => setVoiceRate(speed.value)}
-                    className={`h-9 rounded-md border px-2 text-xs font-medium transition-colors ${
-                      voiceRate === speed.value ? "border-primary bg-primary text-primary-foreground" : "bg-white hover:bg-muted"
-                    }`}
+                    className={`spd${voiceRate === speed.value ? " active" : ""}`}
                   >
                     {speed.label}
                   </button>
@@ -1420,158 +1551,194 @@ export function ConversationView({
               </div>
             </div>
           ) : null}
-          <Button
+
+          <div className="spacer" />
+          <button
             type="button"
-            variant="outline"
-            className="w-full border-destructive/40 font-medium text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className="btn btn-ghost end"
             disabled={phase === "streaming" || phase === "alex_speaking" || phase === "complete" || isEnding}
             onClick={handleEndConversation}
           >
             {isEnding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             End conversation
-          </Button>
-        </div>
-      </aside>
+          </button>
+        </aside>
 
-      <main className="flex min-h-[calc(100vh-3rem)] flex-col rounded-lg border bg-white">
-        <div ref={transcriptRef} className="flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
-          {turns.map((turn, index) => {
-            const turnKey = getTurnKey(turn, index);
-            const translationState = translationsByTurn[turnKey];
-            const visibleText = turn.role === "assistant" && translationState?.status === "ready" && translationState.showing && translationState.text
-              ? translationState.text
-              : turn.content;
-            const translationButtonLabel = translationState?.status === "ready" && translationState.showing ? "View original" : "Translate";
-
-            return (
-              <div key={turnKey} className={`flex ${turn.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[82%] rounded-lg px-4 py-3 text-sm leading-6 ${
-                    turn.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <p>{visibleText}</p>
-                    {turn.role === "assistant" ? (
-                      <div className="mt-1 flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => replayAssistantTurn(turn)}
-                          disabled={phase === "streaming" || phase === "alex_speaking"}
-                          className="rounded-md p-1 text-muted-foreground hover:bg-white disabled:opacity-40"
-                          aria-label="Play audio"
-                        >
-                          <Volume2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleAssistantTranslation(turn, turnKey)}
-                          disabled={translationState?.status === "loading"}
-                          className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-white disabled:opacity-40"
-                          aria-label={translationButtonLabel}
-                        >
-                          {translationState?.status === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
-                          <span className="ml-1">{translationButtonLabel}</span>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  {turn.role === "assistant" && translationState?.status === "error" ? (
-                    <p className="mt-2 text-xs text-destructive">Could not translate.</p>
-                  ) : null}
-                </div>
+        {/* MAIN */}
+        <main className="main">
+          <div className="chat-top">
+            <div className="who">
+              <div className="alex-orb" style={{ width: 36, height: 36 }}>
+                <div className="wave"><i /><i /><i /><i /><i /></div>
               </div>
-            );
-          })}
-
-          {showStreamingBubble ? (
-            <div className="flex justify-start">
-              <div className="max-w-[82%] rounded-lg bg-muted px-4 py-3 text-sm leading-6 text-foreground">
-                {liveAssistantText}
-                <span className="ml-0.5 inline-block animate-pulse">|</span>
+              <div className="meta">
+                <b>Alex</b>
+                <span><span className="live-dot" />{liveVoiceLabel}</span>
               </div>
-            </div>
-          ) : null}
-
-          {showThinkingBubble ? (
-            <div className="flex justify-start">
-              <div className="rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground">
-                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-                Alex is replying
-              </div>
-            </div>
-          ) : null}
-
-          {showCompleteScreen ? (
-            <div className="rounded-lg border bg-background p-4">
-              <p className="font-medium">Session complete</p>
-              <p className="mt-1 text-sm text-muted-foreground">Review your conversation and choose what to improve next.</p>
-              <Button asChild className="mt-4">
-                <Link href={`/practice/${sessionId}/analysis`}>
-                  <BarChart3 className="h-4 w-4" />
-                  See my analysis
-                </Link>
-              </Button>
-            </div>
-          ) : null}
-
-          {process.env.NODE_ENV === "development" && lastTurnMetrics ? (
-            <div className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground">
-              Client TTFT: {lastTurnMetrics.timeToFirstTokenClientMs ?? "n/a"}ms · Voice: {lastTurnMetrics.timeToVoiceStartMs ?? "n/a"}ms · Complete:{" "}
-              {lastTurnMetrics.timeToStreamCompleteClientMs ?? "n/a"}ms
-              {lastTurnMetrics.server ? (
-                <>
-                  {" "}
-                  · Server TTFT: {lastTurnMetrics.server.timeToFirstTokenMs ?? "n/a"}ms
-                  {lastTurnMetrics.server.timeToFirstAudioMs !== undefined ? <> · TTF audio: {lastTurnMetrics.server.timeToFirstAudioMs ?? "n/a"}ms</> : null} · Chars:{" "}
-                  {lastTurnMetrics.server.chars}
-                </>
-              ) : null}
-            </div>
-          ) : null}
-
-          {process.env.NODE_ENV === "development" && lastRoundtripMetrics ? (
-            <div className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground">
-              Roundtrip: {lastRoundtripMetrics.sttEndToAudioMs}ms · Source: {lastRoundtripMetrics.sttEndSource} · STT→Req:{" "}
-              {lastRoundtripMetrics.sttToRequestMs ?? "n/a"}ms · Backend: {lastRoundtripMetrics.requestToBackendReadyMs ?? "n/a"}ms · TTFT:{" "}
-              {lastRoundtripMetrics.requestToTtftMs ?? "n/a"}ms · Chunk→Voice:{" "}
-              {lastRoundtripMetrics.audioChunkToVoiceMs ?? "n/a"}ms
-            </div>
-          ) : null}
-        </div>
-
-        <form onSubmit={handleSubmit} className="border-t p-4 md:p-6">
-          {voiceInputNotice ? <p className="mb-3 rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">{voiceInputNotice}</p> : null}
-          {error ? <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-          <div className="flex flex-col gap-3 md:flex-row">
-            <Textarea
-              ref={textareaRef}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              disabled={disableUserInput || phase === "user_speaking"}
-              placeholder={phase === "complete" || progress.isComplete ? "Session completed" : phase === "user_speaking" ? "Listening..." : "Reply in English..."}
-              className="min-h-[84px] resize-none"
-            />
-            <div className="grid grid-cols-2 gap-3 md:w-40 md:grid-cols-1">
-              <Button
-                type="button"
-                size="lg"
-                variant={phase === "user_speaking" ? "outline" : "default"}
-                disabled={(disableUserInput && phase !== "user_speaking") || !speechSupported}
-                onClick={phase === "user_speaking" ? () => stopListening(true) : startListening}
-                className="h-12 md:h-[40px]"
-              >
-                {phase === "user_speaking" ? <Square className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                {phase === "user_speaking" ? "Send" : "Answer"}
-              </Button>
-              <Button type="submit" size="lg" variant="outline" disabled={disableUserInput || phase === "user_speaking" || !text.trim()} className="h-12 md:h-[40px]">
-                {isStreaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-                Send
-              </Button>
             </div>
           </div>
-        </form>
-      </main>
+
+          <div ref={transcriptRef} className="stream">
+            <div className="stream-in">
+              {turns.map((turn, index) => {
+                const turnKey = getTurnKey(turn, index);
+                const translationState = translationsByTurn[turnKey];
+                const visibleText = turn.role === "assistant" && translationState?.status === "ready" && translationState.showing && translationState.text
+                  ? translationState.text
+                  : turn.content;
+                const translationButtonLabel = translationState?.status === "ready" && translationState.showing ? "View original" : "Translate";
+
+                if (turn.role === "user") {
+                  return (
+                    <div key={turnKey} className="row user">
+                      <div className="bubble">{visibleText}</div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={turnKey} className="row alex">
+                    <div className="alex-orb ava">
+                      <div className="wave"><i /><i /><i /><i /><i /></div>
+                    </div>
+                    <div className="bubble">
+                      {visibleText}
+                      <div className="b-tools">
+                        <button
+                          type="button"
+                          className="play"
+                          onClick={() => replayAssistantTurn(turn)}
+                          disabled={phase === "streaming" || phase === "alex_speaking"}
+                          aria-label="Replay"
+                        >
+                          <Volume2 />
+                          Replay
+                        </button>
+                        <button
+                          type="button"
+                          className="tr"
+                          onClick={() => toggleAssistantTranslation(turn, turnKey)}
+                          disabled={translationState?.status === "loading"}
+                          aria-label={translationButtonLabel}
+                        >
+                          {translationState?.status === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages />}
+                          {translationButtonLabel}
+                        </button>
+                      </div>
+                      {translationState?.status === "error" ? (
+                        <p className="bubble-error">Could not translate.</p>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {showStreamingBubble ? (
+                <div className="row alex">
+                  <div className="alex-orb ava">
+                    <div className="wave"><i /><i /><i /><i /><i /></div>
+                  </div>
+                  <div className="bubble">
+                    {liveAssistantText}
+                    <span className="caret">|</span>
+                  </div>
+                </div>
+              ) : null}
+
+              {showThinkingBubble ? (
+                <div className="row alex">
+                  <div className="alex-orb ava">
+                    <div className="wave"><i /><i /><i /><i /><i /></div>
+                  </div>
+                  <div className="bubble" style={{ color: "var(--gf-ink-2)" }}>
+                    <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                    Alex is replying
+                  </div>
+                </div>
+              ) : null}
+
+              {showCompleteScreen ? (
+                <div className="complete">
+                  <div>
+                    <h4 className="serif">Session complete</h4>
+                    <p>Review your conversation and choose what to improve next.</p>
+                  </div>
+                  <Link href={`/practice/${sessionId}/analysis`} className="btn">
+                    <BarChart3 className="h-4 w-4" />
+                    See my analysis
+                  </Link>
+                </div>
+              ) : null}
+
+              {process.env.NODE_ENV === "development" && lastTurnMetrics ? (
+                <div className="dev-metric">
+                  Client TTFT: {lastTurnMetrics.timeToFirstTokenClientMs ?? "n/a"}ms · Voice: {lastTurnMetrics.timeToVoiceStartMs ?? "n/a"}ms · Complete:{" "}
+                  {lastTurnMetrics.timeToStreamCompleteClientMs ?? "n/a"}ms
+                  {lastTurnMetrics.server ? (
+                    <>
+                      {" "}
+                      · Server TTFT: {lastTurnMetrics.server.timeToFirstTokenMs ?? "n/a"}ms
+                      {lastTurnMetrics.server.timeToFirstAudioMs !== undefined ? <> · TTF audio: {lastTurnMetrics.server.timeToFirstAudioMs ?? "n/a"}ms</> : null} · Chars:{" "}
+                      {lastTurnMetrics.server.chars}
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {process.env.NODE_ENV === "development" && lastRoundtripMetrics ? (
+                <div className="dev-metric">
+                  Roundtrip: {lastRoundtripMetrics.sttEndToAudioMs}ms · Source: {lastRoundtripMetrics.sttEndSource} · STT→Req:{" "}
+                  {lastRoundtripMetrics.sttToRequestMs ?? "n/a"}ms · Backend: {lastRoundtripMetrics.requestToBackendReadyMs ?? "n/a"}ms · TTFT:{" "}
+                  {lastRoundtripMetrics.requestToTtftMs ?? "n/a"}ms · Chunk→Voice:{" "}
+                  {lastRoundtripMetrics.audioChunkToVoiceMs ?? "n/a"}ms
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* composer */}
+          <div className="composer">
+            <div className="composer-in">
+              {voiceInputNotice ? <div className="composer-msg">{voiceInputNotice}</div> : null}
+              {error ? <div className="composer-msg is-error">{error}</div> : null}
+              <form onSubmit={handleSubmit}>
+                <div className={`input-shell${phase === "user_speaking" ? " rec" : ""}`}>
+                  <Textarea
+                    ref={textareaRef}
+                    rows={1}
+                    value={text}
+                    onChange={(event) => setText(event.target.value)}
+                    disabled={disableUserInput || phase === "user_speaking"}
+                    placeholder={phase === "complete" || progress.isComplete ? "Session completed" : phase === "user_speaking" ? "Listening…" : "Type, or tap the mic to speak…"}
+                    className="text-in w-full resize-none rounded-none border-0 bg-transparent px-0 py-2.5 text-base shadow-none outline-none focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
+                  />
+                  <button
+                    type="button"
+                    className={`mic-btn${phase === "user_speaking" ? " rec" : ""}`}
+                    disabled={(disableUserInput && phase !== "user_speaking") || !speechSupported}
+                    onClick={phase === "user_speaking" ? () => stopListening(true) : startListening}
+                    title={phase === "user_speaking" ? "Send" : "Tap to speak"}
+                    aria-label={phase === "user_speaking" ? "Send" : "Answer"}
+                  >
+                    {phase === "user_speaking" ? <Square /> : <Mic />}
+                  </button>
+                  <button
+                    type="submit"
+                    className="send"
+                    disabled={disableUserInput || phase === "user_speaking" || !text.trim()}
+                    aria-label="Send"
+                  >
+                    {isStreaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send />}
+                  </button>
+                </div>
+              </form>
+              <div className="composer-hint">
+                <b>Tip:</b> speak naturally — pause and resume any time. Your transcript builds up so nothing is lost.
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

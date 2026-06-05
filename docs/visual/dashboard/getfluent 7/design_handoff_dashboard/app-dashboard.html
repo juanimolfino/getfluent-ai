@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GetFluent — Dashboard</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  /* top bar */
+  .topbar { border-bottom: 1px solid var(--line); background: color-mix(in srgb,var(--paper) 85%, transparent); backdrop-filter: blur(12px); position: sticky; top: 0; z-index: 40; }
+  .topbar-in { height: 66px; display: flex; align-items: center; justify-content: space-between; }
+  .topbar .right { display: flex; align-items: center; gap: 8px; }
+  .iconlink { display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 500; color: var(--ink-2); padding: 8px 12px; border-radius: 100px; }
+  .iconlink:hover { color: var(--ink); background: var(--paper-2); }
+  .iconlink svg { width: 17px; height: 17px; }
+
+  .page { padding: 44px 0 80px; }
+
+  /* greeting */
+  .greet { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 32px; }
+  .greet > .gcol { flex: 1 1 420px; min-width: 0; }
+  .greet h1 { font-size: clamp(36px, 4.4vw, 54px); line-height: 1.16; margin-bottom: 14px; }
+  .greet h1 .it { font-style: italic; color: var(--lilac-ink); }
+  .greet p { font-size: 16px; color: var(--ink-2); }
+  .greet .who { display: inline-flex; align-items: center; gap: 9px; }
+  .greet .who .av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg,var(--sky),var(--mint)); flex: none; }
+
+  /* stats strip */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 880px){ .stats { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 480px){ .stats { grid-template-columns: 1fr; } }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; position: relative; overflow: hidden; }
+  .stat .k { font-size: 13px; font-weight: 600; letter-spacing: .03em; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+  .stat .k svg { width: 16px; height: 16px; }
+  .stat .v { font-family: 'Instrument Serif', serif; font-size: 50px; line-height: 1; margin-top: 14px; letter-spacing: -.01em; }
+  .stat .v small { font-family: 'Hanken Grotesk', sans-serif; font-size: 15px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+  .stat .sub { font-size: 13.5px; color: var(--ink-3); margin-top: 6px; }
+  .stat .tint { position: absolute; inset: auto -26px -26px auto; width: 96px; height: 96px; border-radius: 50%; filter: blur(28px); opacity: .5; }
+  .stat .pillrow { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 100px; }
+  .badge.pro { background: var(--ink); color: var(--paper); }
+  .badge.live { background: var(--mint); color: var(--mint-ink); display: inline-flex; align-items: center; gap: 6px; }
+  .badge.live .d { width: 6px; height: 6px; border-radius: 50%; background: var(--mint-ink); }
+
+  /* main grid */
+  .grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 900px){ .grid { grid-template-columns: 1fr; } }
+
+  /* hero practice card */
+  .practice {
+    position: relative; overflow: hidden;
+    border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 34px;
+    background: linear-gradient(150deg, color-mix(in srgb,var(--lilac) 36%, var(--card)) 0%, var(--card) 58%);
+  }
+  .practice .blob { position: absolute; width: 240px; height: 240px; border-radius: 50%; filter: blur(46px); opacity: .55; }
+  .practice .blob.b1 { background: var(--peach); top: -90px; right: -50px; }
+  .practice-in { position: relative; z-index: 2; display: flex; gap: 26px; align-items: center; }
+  .practice .copy { flex: 1; }
+  .practice h2 { font-size: 30px; line-height: 1.04; } .practice h2 .it { font-style: italic; }
+  .practice p { font-size: 16px; color: var(--ink-2); margin: 10px 0 24px; max-width: 42ch; }
+  .practice .cta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .practice .resume { font-size: 14px; color: var(--ink-2); }
+  .practice .resume b { color: var(--ink); }
+  .practice .orb-wrap { flex: none; }
+  @media (max-width: 560px){ .practice-in { flex-direction: column-reverse; align-items: flex-start; } }
+
+  /* quick start chips */
+  .quick { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 26px; background: var(--card); }
+  .quick h3 { font-size: 17px; display: flex; align-items: center; gap: 9px; }
+  .quick h3 svg { width: 17px; height: 17px; color: var(--peach-ink); }
+  .quick .sub { font-size: 13.5px; color: var(--ink-3); margin: 5px 0 18px; }
+  .qchips { display: flex; flex-wrap: wrap; gap: 9px; }
+  .qchip { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; border: 1px solid var(--line-2); background: var(--card); color: var(--ink); padding: 10px 15px; border-radius: 100px; font-size: 14.5px; font-weight: 500; transition: all .16s var(--ease); text-decoration: none; }
+  .qchip:hover { transform: translateY(-2px); border-color: var(--ink-3); box-shadow: var(--shadow-sm); }
+  .qchip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .qchip.surprise { border-style: dashed; color: var(--lilac-ink); border-color: var(--lilac-ink); }
+
+  /* recent sessions */
+  .section-h { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 38px 0 18px; }
+  .section-h h2 { font-size: 24px; } .section-h h2 .it { font-style: italic; }
+  .section-h a { font-size: 14px; font-weight: 600; color: var(--lilac-ink); }
+  .section-h a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .sessions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px){ .sessions { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px){ .sessions { grid-template-columns: 1fr; } }
+  .scard { display: block; border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 22px; transition: transform .22s var(--ease), box-shadow .22s var(--ease); }
+  .scard:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+  .scard .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .scard .ico { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; }
+  .scard .ico svg { width: 19px; height: 19px; }
+  .scard .pill { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 100px; }
+  .pill.active { background: var(--mint); color: var(--mint-ink); }
+  .pill.done { background: var(--paper-2); color: var(--ink-3); }
+  .scard h3 { font-size: 18px; margin: 16px 0 4px; }
+  .scard .meta { font-size: 13.5px; color: var(--ink-3); }
+  .scard .barwrap { height: 6px; background: var(--paper-3); border-radius: 100px; overflow: hidden; margin-top: 16px; }
+  .scard .barwrap > i { display: block; height: 100%; background: linear-gradient(90deg,var(--lilac-ink),var(--peach-ink)); border-radius: 100px; }
+
+  /* empty state variant kept subtle (for first-time users) */
+  .empty { border: 1px dashed var(--line-2); border-radius: var(--radius); padding: 40px; text-align: center; color: var(--ink-3); font-size: 15px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <a class="logo" href="landing-a.html">
+      <svg class="mark" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="13" fill="url(#g)"/><path d="M8 13.5c1.4 1.6 3 2.4 5 2.4s3.6-.8 5-2.4" stroke="#3a2a55" stroke-width="1.7" stroke-linecap="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="26" y2="26"><stop stop-color="#E8DEF8"/><stop offset="1" stop-color="#FBE2D2"/></linearGradient></defs></svg>
+      GetFluent
+    </a>
+    <div class="right">
+      <a class="iconlink" href="app-pricing.html"><svg viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M2 10h20" stroke="currentColor" stroke-width="1.7"/></svg>Buy credits</a>
+      <a class="iconlink" href="app-pricing.html"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M7 10h4M7 14h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>Billing</a>
+      <a class="iconlink" href="app-login.html"><svg viewBox="0 0 24 24" fill="none"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Log out</a>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <div class="wrap">
+    <!-- greeting -->
+    <div class="greet">
+      <div class="gcol">
+        <h1 class="serif">Welcome back, <span class="it">Juani.</span></h1>
+        <p class="who"><span class="av"></span>juanimolfinooo@gmail.com</p>
+      </div>
+      <a href="app-settings.html" class="btn btn-lg">
+        Start practicing
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+    </div>
+
+    <!-- stats -->
+    <div class="stats">
+      <div class="stat">
+        <div class="tint pastel-lilac"></div>
+        <div class="k"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v10M9.5 9.2c0-1 .9-1.7 2.4-1.7s2.4.7 2.4 1.7-1 1.5-2.4 1.7-2.4.7-2.4 1.7.9 1.7 2.4 1.7 2.4-.7 2.4-1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Credit balance</div>
+        <div class="v">105</div>
+        <div class="sub">≈ 13 more conversations</div>
+      </div>
+      <div class="stat">
+        <div class="k"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Subscription</div>
+        <div class="v" style="font-size:40px;margin-top:18px">Pro</div>
+        <div class="pillrow"><span class="badge live"><span class="d"></span>Active</span><span class="sub" style="margin:0">renews Jul 5</span></div>
+      </div>
+      <div class="stat">
+        <div class="tint pastel-peach"></div>
+        <div class="k"><svg viewBox="0 0 24 24" fill="none"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Current streak</div>
+        <div class="v">7<small> days</small></div>
+        <div class="sub">Best: 12 days</div>
+      </div>
+      <div class="stat">
+        <div class="tint pastel-sky"></div>
+        <div class="k"><svg viewBox="0 0 24 24" fill="none"><path d="M4 4v16h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8 14l3-3 3 2 4-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>This week</div>
+        <div class="v">5<small> sessions</small></div>
+        <div class="sub">~42 min speaking</div>
+      </div>
+    </div>
+
+    <!-- main grid -->
+    <div class="grid">
+      <!-- practice hero -->
+      <div class="practice">
+        <div class="blob b1"></div>
+        <div class="practice-in">
+          <div class="copy">
+            <h2 class="serif">Practice with <span class="it">Alex</span></h2>
+            <p>Start a guided English conversation by choosing your level, interests, and topic. Alex replies in a natural voice and adapts as you go.</p>
+            <div class="cta-row">
+              <a href="app-settings.html" class="btn">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M21 11.5a8.4 8.4 0 01-9 8.4L3 21l1.1-3.4A8.4 8.4 0 1121 11.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                New conversation
+              </a>
+              <span class="resume">or resume <b>“Job interview · dive center”</b></span>
+            </div>
+          </div>
+          <div class="orb-wrap">
+            <div class="alex-orb" style="width:96px;height:96px"><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- quick start -->
+      <div class="quick">
+        <h3><svg viewBox="0 0 24 24" fill="none"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Jump back in</h3>
+        <p class="sub">Start a quick session on a familiar topic.</p>
+        <div class="qchips">
+          <a href="app-settings.html" class="qchip"><span class="dot pastel-lilac"></span>Gaming</a>
+          <a href="app-settings.html" class="qchip"><span class="dot pastel-sky"></span>Travel</a>
+          <a href="app-settings.html" class="qchip"><span class="dot pastel-peach"></span>Interviews</a>
+          <a href="app-settings.html" class="qchip"><span class="dot pastel-mint"></span>Football</a>
+          <a href="app-settings.html" class="qchip surprise">✦ Surprise me</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- recent sessions -->
+    <div class="section-h">
+      <h2 class="serif">Recent <span class="it">conversations</span></h2>
+      <a href="app-settings.html">View all →</a>
+    </div>
+    <div class="sessions">
+      <a class="scard" href="app-chat.html">
+        <div class="top">
+          <div class="ico pastel-lilac" style="color:var(--lilac-ink)"><svg viewBox="0 0 24 24" fill="none"><path d="M21 11.5a8.4 8.4 0 01-9 8.4L3 21l1.1-3.4A8.4 8.4 0 1121 11.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></div>
+          <span class="pill done">Completed</span>
+        </div>
+        <h3>Gaming</h3>
+        <div class="meta">B2 · 5 / 5 turns · yesterday</div>
+        <div class="barwrap"><i style="width:100%"></i></div>
+      </a>
+      <a class="scard" href="app-chat.html">
+        <div class="top">
+          <div class="ico pastel-peach" style="color:var(--peach-ink)"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" stroke="currentColor" stroke-width="1.8"/></svg></div>
+          <span class="pill active">Active</span>
+        </div>
+        <h3>Job interview · dive center</h3>
+        <div class="meta">A2 · 5 / 6 turns · 2 days ago</div>
+        <div class="barwrap"><i style="width:83%"></i></div>
+      </a>
+      <a class="scard" href="app-chat.html">
+        <div class="top">
+          <div class="ico pastel-sky" style="color:var(--sky-ink)"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12l9-9 9 9M5 10v10h14V10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <span class="pill done">Completed</span>
+        </div>
+        <h3>Copa del Mundo</h3>
+        <div class="meta">A2 · 6 / 6 turns · 3 days ago</div>
+        <div class="barwrap"><i style="width:100%"></i></div>
+      </a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

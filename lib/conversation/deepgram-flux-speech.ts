@@ -22,9 +22,18 @@ type DeepgramTokenResponse = {
   provider: "deepgram_flux";
 };
 
+export type DeepgramFluxToken = DeepgramTokenResponse;
+
+type DeepgramFluxTokenRequestOptions = {
+  sessionId?: string;
+  tokenEndpoint?: string;
+  fetchImpl?: typeof fetch;
+};
+
 type DeepgramFluxSpeechProviderOptions = SpeechToTextProviderCallbacks & {
   sessionId?: string;
   tokenEndpoint?: string;
+  prefetchedTokenPromise?: Promise<DeepgramFluxToken>;
   fetchImpl?: typeof fetch;
   webSocketFactory?: (url: string, protocols: string[]) => WebSocket;
   mediaDevices?: Pick<MediaDevices, "getUserMedia">;
@@ -71,6 +80,26 @@ function isTokenResponse(value: unknown): value is DeepgramTokenResponse {
     typeof candidate.model === "string" &&
     candidate.provider === "deepgram_flux"
   );
+}
+
+export async function fetchDeepgramFluxToken(options: DeepgramFluxTokenRequestOptions = {}) {
+  const fetchImpl = options.fetchImpl ?? getDefaultFetch();
+  if (!fetchImpl) throw new Error("fetch is not available");
+
+  const tokenEndpoint = options.tokenEndpoint ?? "/api/stt/deepgram-token";
+  const response = await fetchImpl(tokenEndpoint, {
+    method: "POST",
+    headers: options.sessionId ? { "Content-Type": "application/json" } : undefined,
+    body: options.sessionId ? JSON.stringify({ sessionId: options.sessionId }) : undefined
+  });
+
+  if (!response.ok) {
+    throw new Error(`token_endpoint_${response.status}`);
+  }
+
+  const body = await response.json();
+  if (!isTokenResponse(body)) throw new Error("token_response_malformed");
+  return body;
 }
 
 export function createDeepgramFluxSpeechProvider(options: DeepgramFluxSpeechProviderOptions = {}): SpeechToTextProvider {
@@ -132,27 +161,16 @@ export function createDeepgramFluxSpeechProvider(options: DeepgramFluxSpeechProv
   }
 
   function providerIsSupported() {
-    if (!fetchImpl || !webSocketFactory || !mediaDevices || !mediaRecorderFactory) return false;
+    if ((!fetchImpl && !options.prefetchedTokenPromise) || !webSocketFactory || !mediaDevices || !mediaRecorderFactory) return false;
     return Boolean(pickSupportedMimeType(isMimeTypeSupported));
   }
 
-  async function fetchToken() {
-    if (!fetchImpl) throw new Error("fetch is not available");
+  async function resolveToken() {
     const tokenFetchStartedAt = now();
-    const response = await fetchImpl(tokenEndpoint, {
-      method: "POST",
-      headers: options.sessionId ? { "Content-Type": "application/json" } : undefined,
-      body: options.sessionId ? JSON.stringify({ sessionId: options.sessionId }) : undefined
-    });
+    const token = options.prefetchedTokenPromise ?? fetchDeepgramFluxToken({ sessionId: options.sessionId, tokenEndpoint, fetchImpl });
+    const resolvedToken = await token;
     emitMetrics({ tokenFetchMs: Math.round(now() - tokenFetchStartedAt) });
-
-    if (!response.ok) {
-      throw new Error(`token_endpoint_${response.status}`);
-    }
-
-    const body = await response.json();
-    if (!isTokenResponse(body)) throw new Error("token_response_malformed");
-    return body;
+    return resolvedToken;
   }
 
   function flushPendingAudio() {
@@ -210,7 +228,7 @@ export function createDeepgramFluxSpeechProvider(options: DeepgramFluxSpeechProv
         return;
       }
 
-      const tokenPromise = fetchToken()
+      const tokenPromise = resolveToken()
         .then((token): { ok: true; token: DeepgramTokenResponse } => ({ ok: true, token }))
         .catch((tokenError): { ok: false; reason: string } => ({
           ok: false,

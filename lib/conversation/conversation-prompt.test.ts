@@ -12,7 +12,9 @@ describe("buildConversationSystemPrompt", () => {
     });
 
     expect(prompt).toContain("This is NOT the last turn");
-    expect(prompt).toContain("ask another engaging question");
+    expect(prompt).toContain("end with one direct question");
+    expect(prompt).toContain("obvious next thing to say");
+    expect(prompt).toContain("must never feel closed");
     expect(prompt).toContain("Do not say goodbye");
     expect(prompt).toContain("Do not say goodbye, wrap up, mention finishing, or mention analysis");
     expect(prompt).not.toContain("This IS the final turn");

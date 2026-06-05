@@ -2,10 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2, RefreshCw, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Loader2 } from "lucide-react";
 import { pickCreativeConversationTopic } from "@/lib/conversation/creative-topics";
 import type { EnglishLevel, NativeLanguage, UserLanguageProfile } from "@/lib/db/schema";
 
@@ -28,6 +25,8 @@ const NATIVE_LANGUAGES: { value: NativeLanguage; label: string }[] = [
 ];
 
 const TOPICS = ["travel", "music", "technology", "food", "movies", "business", "football", "gaming"];
+const PROFILE_TEXT_LIMIT = 40;
+const CONVERSATION_TOPIC_LIMIT = 100;
 
 type SetupFormProps = {
   profile: UserLanguageProfile | null;
@@ -36,24 +35,60 @@ type SetupFormProps = {
 function parseList(value: string) {
   return value
     .split(",")
-    .map((item) => item.trim())
+    .map((item) => toProfileText(item))
     .filter(Boolean)
     .slice(0, 10);
 }
 
+function toProfileText(value: string) {
+  return value.trim().slice(0, PROFILE_TEXT_LIMIT);
+}
+
+function toConversationTopic(value: string) {
+  return value.trim().slice(0, CONVERSATION_TOPIC_LIMIT);
+}
+
+function buildPreferredTopics(selectedTopic: string, interests: string[]) {
+  return Array.from(new Set([selectedTopic, ...interests].map((item) => toProfileText(item)).filter(Boolean))).slice(0, 5);
+}
+
+function displayTopic(value: string) {
+  return value
+    .split(/\s+/)
+    .map((word) => (word ? `${word[0].toUpperCase()}${word.slice(1)}` : word))
+    .join(" ");
+}
+
+function ArrowIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none">
+      <path
+        d="M5 12h14M13 6l6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function SetupForm({ profile }: SetupFormProps) {
   const router = useRouter();
-  const [englishLevel, setEnglishLevel] = useState<EnglishLevel>(profile?.englishLevel ?? "A2");
+  const [englishLevel, setEnglishLevel] = useState<EnglishLevel>(profile?.englishLevel ?? "B2");
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>(profile?.nativeLanguage ?? "spanish");
-  const [topic, setTopic] = useState(profile?.preferredTopics[0] ?? "travel");
+  const [topic, setTopic] = useState(profile?.preferredTopics[0] ?? "gaming");
   const [customTopic, setCustomTopic] = useState("");
   const [suggestedTopic, setSuggestedTopic] = useState<string | null>(null);
-  const [interests, setInterests] = useState((profile?.interests?.length ? profile.interests : ["travel", "music"]).join(", "));
+  const [interests, setInterests] = useState(
+    (profile?.interests?.length ? profile.interests : ["travel", "music", "fútbol", "guitar"]).join(", ")
+  );
   const [targetTurns, setTargetTurns] = useState(8);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const selectedTopic = useMemo(() => customTopic.trim() || topic, [customTopic, topic]);
+  const selectedTopic = useMemo(() => toConversationTopic(customTopic || topic), [customTopic, topic]);
+  const summaryTopic = selectedTopic ? displayTopic(selectedTopic) : "Topic";
 
   function suggestCreativeTopic() {
     const nextTopic = pickCreativeConversationTopic(suggestedTopic ?? selectedTopic);
@@ -69,7 +104,7 @@ export function SetupForm({ profile }: SetupFormProps) {
 
     try {
       const parsedInterests = parseList(interests);
-      const preferredTopics = Array.from(new Set([selectedTopic, ...parsedInterests])).slice(0, 5);
+      const preferredTopics = buildPreferredTopics(selectedTopic, parsedInterests);
 
       const profileResponse = await fetch("/api/user-profile/language", {
         method: "POST",
@@ -77,7 +112,7 @@ export function SetupForm({ profile }: SetupFormProps) {
         body: JSON.stringify({
           nativeLanguage,
           englishLevel,
-          interests: parsedInterests.length ? parsedInterests : [selectedTopic],
+          interests: parsedInterests.length ? parsedInterests : [toProfileText(selectedTopic)],
           preferredTopics
         })
       });
@@ -103,47 +138,45 @@ export function SetupForm({ profile }: SetupFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
-      <section>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Your level</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Alex adapts vocabulary, speed, and questions to this level.</p>
-          </div>
-          <Badge className="bg-white">Step 1</Badge>
+    <form onSubmit={handleSubmit} className="panel">
+      <section className="block">
+        <div className="block-head">
+          <h2 className="serif">
+            Your <span className="it">level</span>
+          </h2>
+          <span className="step">Step 1</span>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <p className="block-sub">Alex adapts vocabulary, speed, and questions to this level.</p>
+        <div className="levels">
           {LEVELS.map((level) => (
             <button
               key={level.value}
               type="button"
               onClick={() => setEnglishLevel(level.value)}
-              className={`rounded-lg border bg-white p-4 text-left transition-colors ${
-                englishLevel === level.value ? "border-primary ring-2 ring-primary/20" : "hover:bg-muted"
-              }`}
+              className={`lvl${englishLevel === level.value ? " on" : ""}`}
             >
-              <span className="text-lg font-semibold">{level.label}</span>
-              <span className="mt-1 block text-sm text-muted-foreground">{level.detail}</span>
+              <div className="code">{level.label}</div>
+              <div className="desc">{level.detail}</div>
             </button>
           ))}
         </div>
       </section>
 
-      <section>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Practice context</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Pick what Alex should use to make the session feel natural.</p>
-          </div>
-          <Badge className="bg-white">Step 2</Badge>
+      <section className="block">
+        <div className="block-head">
+          <h2 className="serif">
+            Practice <span className="it">context</span>
+          </h2>
+          <span className="step">Step 2</span>
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-[220px_1fr]">
-          <label className="space-y-2">
-            <span className="text-sm font-medium">Native language</span>
+        <p className="block-sub">What Alex should use to make the session feel like you.</p>
+        <div className="two">
+          <label>
+            <span className="lab">Native language</span>
             <select
               value={nativeLanguage}
               onChange={(event) => setNativeLanguage(event.target.value as NativeLanguage)}
-              className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="ctrl"
             >
               {NATIVE_LANGUAGES.map((language) => (
                 <option key={language.value} value={language.value}>
@@ -152,22 +185,27 @@ export function SetupForm({ profile }: SetupFormProps) {
               ))}
             </select>
           </label>
-          <label className="space-y-2">
-            <span className="text-sm font-medium">Interests</span>
-            <Input value={interests} onChange={(event) => setInterests(event.target.value)} placeholder="travel, startups, music" />
+          <label>
+            <span className="lab">Interests</span>
+            <input
+              className="ctrl"
+              value={interests}
+              onChange={(event) => setInterests(event.target.value)}
+              placeholder="travel, music, fútbol, guitar"
+            />
           </label>
         </div>
       </section>
 
-      <section>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Today's conversation</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Choose a topic and session length.</p>
-          </div>
-          <Badge className="bg-white">Step 3</Badge>
+      <section className="block">
+        <div className="block-head">
+          <h2 className="serif">
+            Today's <span className="it">conversation</span>
+          </h2>
+          <span className="step">Step 3</span>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <p className="block-sub">Pick a topic and session length - or roll a random one.</p>
+        <div className="topics">
           {TOPICS.map((item) => (
             <button
               key={item}
@@ -177,25 +215,24 @@ export function SetupForm({ profile }: SetupFormProps) {
                 setCustomTopic("");
                 setSuggestedTopic(null);
               }}
-              className={`rounded-md border px-3 py-2 text-sm capitalize transition-colors ${
-                selectedTopic === item ? "border-primary bg-primary text-primary-foreground" : "bg-white hover:bg-muted"
-              }`}
+              className={`topic${!customTopic.trim() && topic === item ? " on" : ""}`}
             >
-              {item}
+              {displayTopic(item)}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={suggestCreativeTopic}
+            className={`topic random${suggestedTopic ? " on" : ""}`}
+          >
+            ✦ Surprise me
+          </button>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button type="button" variant="outline" onClick={suggestCreativeTopic}>
-            {suggestedTopic ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-            {suggestedTopic ? "Try another" : "Give me a topic"}
-          </Button>
-          {suggestedTopic ? <p className="text-sm font-medium text-muted-foreground">{suggestedTopic}</p> : null}
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_180px]">
-          <label className="space-y-2">
-            <span className="text-sm font-medium">Custom topic</span>
-            <Input
+        <div className="turns-row">
+          <label>
+            <span className="lab">Custom topic</span>
+            <input
+              className="ctrl"
               value={customTopic}
               onChange={(event) => {
                 setCustomTopic(event.target.value);
@@ -204,9 +241,10 @@ export function SetupForm({ profile }: SetupFormProps) {
               placeholder="job interviews, Argentina, product ideas"
             />
           </label>
-          <label className="space-y-2">
-            <span className="text-sm font-medium">User turns</span>
-            <Input
+          <label>
+            <span className="lab">User turns</span>
+            <input
+              className="ctrl"
               type="number"
               min={4}
               max={30}
@@ -217,12 +255,18 @@ export function SetupForm({ profile }: SetupFormProps) {
         </div>
       </section>
 
-      {error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="setup-error">{error}</p> : null}
 
-      <Button type="submit" size="lg" disabled={isSubmitting || !selectedTopic}>
-        {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-        Start practicing
-      </Button>
+      <div className="start-row">
+        <span className="summary">
+          Ready: <b>{englishLevel}</b> · <b>{summaryTopic}</b> · <b>{targetTurns} turns</b> · voice + text
+        </span>
+        <button type="submit" className="btn btn-lg" disabled={isSubmitting || !selectedTopic}>
+          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Start practicing
+          {!isSubmitting ? <ArrowIcon /> : null}
+        </button>
+      </div>
     </form>
   );
 }

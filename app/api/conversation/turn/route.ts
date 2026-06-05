@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
+import { getConversationFollowUpDelta } from "@/lib/conversation/assistant-response";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
 import { getSessionState, markSessionComplete, saveAssistantTurn, saveUserTurn } from "@/lib/conversation/session-state";
 import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
@@ -58,7 +59,8 @@ export async function POST(request: Request) {
       messages
     });
 
-    const content = extractTextFromMessage(message);
+    const rawContent = extractTextFromMessage(message);
+    const content = `${rawContent}${getConversationFollowUpDelta(rawContent, isLastTurn)}`;
     const assistantTurn: ConversationTurn = {
       role: "assistant",
       content,

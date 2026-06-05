@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { isPremiumUser } from "@/lib/billing/tier";
 import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, getAnthropic } from "@/lib/conversation/anthropic";
+import { getConversationFollowUpDelta } from "@/lib/conversation/assistant-response";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
 import { createElevenLabsStream, type ElevenLabsCharAlignment, type ElevenLabsStream } from "@/lib/conversation/elevenlabs-stream";
 import { getCachedAudio, getPhraseCacheVoiceId, isCachedPhrase } from "@/lib/conversation/phrase-cache";
@@ -448,6 +449,13 @@ export async function POST(request: Request) {
             if (cachedAudioPromise) await cachedAudioPromise;
           }
           timeToStreamCompleteMs = Math.round(performance.now() - requestStartedAt);
+
+          const followUpDelta = getConversationFollowUpDelta(fullText, isLastTurn);
+          if (followUpDelta) {
+            fullText += followUpDelta;
+            ttsBuffer += followUpDelta;
+            emitText(followUpDelta);
+          }
 
           const cachedAudioPromise = flushTextToElevenLabs(true);
           if (cachedAudioPromise) await cachedAudioPromise;

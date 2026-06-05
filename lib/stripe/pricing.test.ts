@@ -5,7 +5,8 @@ describe("pricing config", () => {
   it("keeps Fluent prices wired to Stripe price env vars", () => {
     expect(CREDIT_PACKS).toEqual([
       { id: "credits_10", name: "Starter Pack", credits: 25, price: 5, stripePriceEnv: "STRIPE_PRICE_ID_CREDITS_10" },
-      { id: "credits_50", name: "Practice Pack", credits: 75, price: 12, stripePriceEnv: "STRIPE_PRICE_ID_CREDITS_50" }
+      { id: "credits_50", name: "Practice Pack", credits: 75, price: 12, stripePriceEnv: "STRIPE_PRICE_ID_CREDITS_50" },
+      { id: "credits_200", name: "Fluent Pack", credits: 200, price: 28, stripePriceEnv: "STRIPE_PRICE_ID_CREDITS_200" }
     ]);
 
     expect(PLANS.find((plan) => plan.id === "pro")).toMatchObject({

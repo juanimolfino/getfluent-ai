@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, getAnthropic } from "@/lib/conversation/anthropic";
+import { getConversationFollowUpDelta } from "@/lib/conversation/assistant-response";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
 import { getSessionState, markSessionComplete, saveAssistantTurn, saveUserTurn } from "@/lib/conversation/session-state";
 import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
@@ -102,6 +103,12 @@ export async function POST(request: Request) {
             timeToFirstTokenMs ??= Math.round(performance.now() - requestStartedAt);
             fullText += event.delta.text;
             controller.enqueue(encoder.encode(encodeSse({ type: "text", delta: event.delta.text })));
+          }
+
+          const followUpDelta = getConversationFollowUpDelta(fullText, isLastTurn);
+          if (followUpDelta) {
+            fullText += followUpDelta;
+            controller.enqueue(encoder.encode(encodeSse({ type: "text", delta: followUpDelta })));
           }
 
           const timeToStreamCompleteMs = Math.round(performance.now() - requestStartedAt);

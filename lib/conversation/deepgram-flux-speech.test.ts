@@ -53,16 +53,20 @@ function createMediaDevices() {
 }
 
 function tokenResponse(token = "temporary-token") {
-  return new Response(JSON.stringify({
+  return new Response(JSON.stringify(tokenBody(token)), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+}
+
+function tokenBody(token = "temporary-token") {
+  return {
     accessToken: token,
     expiresIn: 30,
     websocketUrl: "wss://api.deepgram.com/v2/listen?model=flux-general-en",
     model: "flux-general-en",
     provider: "deepgram_flux"
-  }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  });
+  } as const;
 }
 
 function createDeferred<T>() {
@@ -175,6 +179,60 @@ describe("createDeepgramFluxSpeechProvider", () => {
 
     expect(socket.sent).toHaveLength(1);
     expect(socket.sent[0]).toBeInstanceOf(ArrayBuffer);
+    provider.cancel();
+  });
+
+  it("uses a prefetched token without calling the token endpoint", async () => {
+    let clock = 100;
+    const socket = new FakeSocket();
+    const fetchImpl = vi.fn();
+    const webSocketFactory = vi.fn((_url: string, _protocols: string[]) => socket as unknown as WebSocket);
+    const onMetrics = vi.fn();
+    const { mediaDevices } = createMediaDevices();
+
+    const provider = createDeepgramFluxSpeechProvider({
+      prefetchedTokenPromise: Promise.resolve(tokenBody("prefetched-token")),
+      fetchImpl,
+      webSocketFactory,
+      mediaDevices,
+      mediaRecorderFactory: (stream, options) => new FakeMediaRecorder(stream, options) as unknown as MediaRecorder,
+      isMimeTypeSupported: () => true,
+      now: () => clock,
+      onMetrics
+    });
+
+    await provider.start();
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(webSocketFactory).toHaveBeenCalledWith("wss://api.deepgram.com/v2/listen?model=flux-general-en", ["bearer", "prefetched-token"]);
+    expect(onMetrics).toHaveBeenCalledWith(expect.objectContaining({ provider: "deepgram_flux", tokenFetchMs: 0 }));
+  });
+
+  it("keeps recording while a pending prefetched token resolves", async () => {
+    const tokenDeferred = createDeferred<ReturnType<typeof tokenBody>>();
+    const socket = new FakeSocket();
+    const recorderRef: { current: FakeMediaRecorder | null } = { current: null };
+    const { mediaDevices } = createMediaDevices();
+
+    const provider = createDeepgramFluxSpeechProvider({
+      prefetchedTokenPromise: tokenDeferred.promise,
+      fetchImpl: vi.fn(),
+      webSocketFactory: () => socket as unknown as WebSocket,
+      mediaDevices,
+      mediaRecorderFactory: (stream, options) => {
+        recorderRef.current = new FakeMediaRecorder(stream, options);
+        return recorderRef.current as unknown as MediaRecorder;
+      },
+      isMimeTypeSupported: () => true
+    });
+
+    const startPromise = provider.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(recorderRef.current?.start).toHaveBeenCalledWith(80);
+
+    tokenDeferred.resolve(tokenBody("pending-prefetch-token"));
+    await startPromise;
     provider.cancel();
   });
 

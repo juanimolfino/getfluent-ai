@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GetFluent — Sign in</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  body { height: 100vh; overflow: hidden; }
+  .auth { display: grid; grid-template-columns: 1.05fr 1fr; height: 100vh; }
+
+  /* left brand panel */
+  .brand-side {
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(120% 90% at 18% 12%, var(--lilac) 0%, transparent 55%),
+      radial-gradient(120% 100% at 95% 100%, var(--peach) 0%, transparent 50%),
+      var(--paper-2);
+    padding: 48px; display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .brand-side .grain { position: absolute; inset: 0; opacity: .4;
+    background-image: radial-gradient(var(--line-2) .8px, transparent .8px); background-size: 22px 22px; mask: radial-gradient(120% 120% at 50% 40%, #000 30%, transparent 80%); }
+  .brand-top { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center; }
+  .back { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); font-weight: 500; }
+  .back:hover { color: var(--ink); }
+
+  .brand-mid { position: relative; z-index: 2; }
+  .brand-mid h2 { font-size: clamp(40px, 4.6vw, 60px); line-height: 1.02; margin: 30px 0 0; max-width: 14ch; }
+  .brand-mid h2 .it { font-style: italic; color: var(--lilac-ink); }
+  .quote { position: relative; z-index: 2; max-width: 36ch; }
+  .quote p { font-family: 'Instrument Serif', serif; font-size: 24px; line-height: 1.25; color: var(--ink); }
+  .quote .by { display: flex; align-items: center; gap: 11px; margin-top: 18px; font-size: 14px; color: var(--ink-2); }
+  .quote .av { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg,var(--sky),var(--mint)); flex: none; }
+
+  /* right form */
+  .form-side { display: grid; place-items: center; padding: 40px; background: var(--paper); }
+  .form-box { width: 100%; max-width: 380px; }
+  .form-box .lead { font-size: clamp(40px, 4vw, 52px); line-height: 1.02; }
+  .form-box .lead .it { font-style: italic; }
+  .form-box .desc { color: var(--ink-2); font-size: 17px; margin: 14px 0 32px; }
+  .field { position: relative; margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 7px; }
+  .input {
+    width: 100%; font: inherit; font-size: 16px; padding: 14px 16px;
+    border: 1px solid var(--line-2); border-radius: 13px; background: var(--card); color: var(--ink);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .input::placeholder { color: var(--ink-3); }
+  .input:focus { outline: none; border-color: var(--lilac-ink); box-shadow: 0 0 0 4px color-mix(in srgb, var(--lilac) 60%, transparent); }
+  .btn-full { width: 100%; justify-content: center; }
+  .or { display: flex; align-items: center; gap: 16px; margin: 22px 0; color: var(--ink-3); font-size: 13px; }
+  .or::before, .or::after { content:''; flex: 1; height: 1px; background: var(--line); }
+  .g-btn { width: 100%; justify-content: center; gap: 11px; }
+  .legal { font-size: 12.5px; color: var(--ink-3); text-align: center; margin-top: 26px; line-height: 1.6; }
+  .legal a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+
+  @media (max-width: 860px){ .auth { grid-template-columns: 1fr; } .brand-side { display: none; } body{ overflow:auto; } }
+</style>
+</head>
+<body>
+<div class="auth">
+  <!-- LEFT -->
+  <aside class="brand-side">
+    <div class="grain"></div>
+    <div class="brand-top">
+      <a class="logo" href="landing-a.html">
+        <svg class="mark" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="13" fill="url(#g)"/><path d="M8 13.5c1.4 1.6 3 2.4 5 2.4s3.6-.8 5-2.4" stroke="#3a2a55" stroke-width="1.7" stroke-linecap="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="26" y2="26"><stop stop-color="#E8DEF8"/><stop offset="1" stop-color="#FBE2D2"/></linearGradient></defs></svg>
+        GetFluent
+      </a>
+      <a class="back" href="landing-a.html"><svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Back home</a>
+    </div>
+
+    <div class="brand-mid">
+      <div class="alex-orb" style="width:72px;height:72px"><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
+      <h2 class="serif">Pick up right where you <span class="it">left off.</span></h2>
+    </div>
+
+    <div class="quote">
+      <p>"It feels like talking to a patient friend who happens to be fluent. I stopped being scared of speaking."</p>
+      <div class="by"><span class="av"></span>Lucía R. · practicing for B2 · 38-day streak</div>
+    </div>
+  </aside>
+
+  <!-- RIGHT -->
+  <main class="form-side">
+    <div class="form-box">
+      <h1 class="lead serif">Welcome <span class="it">back.</span></h1>
+      <p class="desc">Sign in with a magic link or Google to keep practicing with Alex.</p>
+
+      <form onsubmit="return false">
+        <div class="field">
+          <label for="email">Email</label>
+          <input class="input" id="email" type="email" placeholder="you@example.com" />
+        </div>
+        <button class="btn btn-lg btn-full" type="submit">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Send magic link
+        </button>
+      </form>
+
+      <div class="or">or</div>
+
+      <button class="btn btn-white btn-lg g-btn">
+        <svg viewBox="0 0 24 24" width="19" height="19"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.4-1.7 4.1-5.5 4.1A6.2 6.2 0 015.8 12 6.2 6.2 0 0112 5.8c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.1 14.7 2 12 2 6.5 2 2 6.5 2 12s4.5 10 10 10c5.8 0 9.6-4.1 9.6-9.8 0-.7-.1-1.2-.2-1.7H12z"/></svg>
+        Continue with Google
+      </button>
+
+      <p class="legal">By continuing you agree to GetFluent's <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>
+    </div>
+  </main>
+</div>
+</body>
+</html>
