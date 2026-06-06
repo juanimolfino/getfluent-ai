@@ -5,6 +5,7 @@ import { isPremiumUser } from "@/lib/billing/tier";
 import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, getAnthropic } from "@/lib/conversation/anthropic";
 import { getConversationFollowUpDelta } from "@/lib/conversation/assistant-response";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
+import { takeElevenLabsSafeChunk } from "@/lib/conversation/elevenlabs-text-buffer";
 import { createElevenLabsStream, type ElevenLabsCharAlignment, type ElevenLabsStream } from "@/lib/conversation/elevenlabs-stream";
 import { getCachedAudio, getPhraseCacheVoiceId, isCachedPhrase } from "@/lib/conversation/phrase-cache";
 import {
@@ -18,7 +19,6 @@ import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
 import type { ConversationSession, ConversationTurn } from "@/lib/db/schema";
 
 const START_CONVERSATION_TEXT = "[START_CONVERSATION]";
-const ELEVENLABS_CHUNK_TARGET_CHARS = 20;
 
 const conversationStreamSchema = z.object({
   sessionId: z.string().uuid(),
@@ -86,12 +86,6 @@ function applyUserTurnInMemory(session: ConversationSession, userTurn: Conversat
     completedTurns: turns.filter((turn) => turn.role === "user").length,
     updatedAt: new Date()
   };
-}
-
-function shouldFlushToElevenLabs(buffer: string) {
-  if (!buffer.trim()) return false;
-  if (buffer.length >= ELEVENLABS_CHUNK_TARGET_CHARS) return true;
-  return /[\s,.;:!?]$/.test(buffer) && buffer.trim().length >= 8;
 }
 
 function logPremiumLatency(metrics: PremiumLatencyLogInput) {
@@ -373,9 +367,10 @@ export async function POST(request: Request) {
 
         async function flushTextToElevenLabs(force = false) {
           if (audioFailed) return;
-          if (!force && !shouldFlushToElevenLabs(ttsBuffer)) return;
-          const text = ttsBuffer;
-          ttsBuffer = "";
+          const nextChunk = takeElevenLabsSafeChunk(ttsBuffer, force);
+          if (!nextChunk) return;
+          const text = nextChunk.chunk;
+          ttsBuffer = nextChunk.rest;
           if (!text.trim()) return;
 
           if (isCachedPhrase(text)) {

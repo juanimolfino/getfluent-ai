@@ -10,6 +10,8 @@ import {
   timestamp,
   uuid
 } from "drizzle-orm/pg-core";
+import type { WeakPoint, Theory } from "@/lib/exercises/analysis";
+import type { Exercise } from "@/lib/exercises/types";
 
 export const jobStatusEnum = pgEnum("job_status", ["pending", "processing", "done", "failed"]);
 export const jobTypeEnum = pgEnum("job_type", ["image", "tts"]);
@@ -147,3 +149,32 @@ export type ConversationSession = typeof conversationSessions.$inferSelect;
 export type EnglishLevel = typeof englishLevelEnum.enumValues[number];
 export type NativeLanguage = typeof nativeLanguageEnum.enumValues[number];
 export type SessionStatus = typeof sessionStatusEnum.enumValues[number];
+
+export const conversationAnalyses = pgTable("conversation_analyses", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sessionId: uuid("session_id").references(() => conversationSessions.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  encouragement: text("encouragement").notNull(),
+  weakPoints: jsonb("weak_points").$type<WeakPoint[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+}, (table) => [
+  index("conversation_analyses_session_user_idx").on(table.sessionId, table.userId)
+]);
+
+export const exerciseSets = pgTable("exercise_sets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  analysisId: uuid("analysis_id").references(() => conversationAnalyses.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  weakPointId: text("weak_point_id").notNull(),
+  theory: jsonb("theory").$type<Theory>().notNull(),
+  exercises: jsonb("exercises").$type<Exercise[]>().notNull(),
+  score: integer("score"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+}, (table) => [
+  index("exercise_sets_analysis_weak_point_idx").on(table.analysisId, table.weakPointId),
+  index("exercise_sets_user_idx").on(table.userId)
+]);
+
+export type ConversationAnalysis = typeof conversationAnalyses.$inferSelect;
+export type ExerciseSet = typeof exerciseSets.$inferSelect;

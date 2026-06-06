@@ -1,12 +1,18 @@
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
+  conversationAnalyses,
   conversationSessions,
+  exerciseSets,
   userLanguageProfiles,
+  type ConversationAnalysis,
   type ConversationTurn,
+  type ExerciseSet,
   type EnglishLevel,
   type NativeLanguage
 } from "@/lib/db/schema";
+import type { ConversationAnalysisPayload, Theory } from "@/lib/exercises/analysis";
+import type { Exercise } from "@/lib/exercises/types";
 
 type LanguageProfileInput = {
   nativeLanguage: NativeLanguage;
@@ -124,6 +130,94 @@ export async function completeConversationSession(sessionId: string) {
     .where(eq(conversationSessions.id, sessionId))
     .returning();
   return updated;
+}
+
+export async function markConversationSessionAnalyzed(sessionId: string) {
+  const [updated] = await getDb()
+    .update(conversationSessions)
+    .set({ status: "analyzed", updatedAt: new Date() })
+    .where(eq(conversationSessions.id, sessionId))
+    .returning();
+  return updated;
+}
+
+export async function getConversationAnalysisBySession(sessionId: string, userId: string): Promise<ConversationAnalysis | null> {
+  const analysis = await getDb().query.conversationAnalyses.findFirst({
+    where: and(eq(conversationAnalyses.sessionId, sessionId), eq(conversationAnalyses.userId, userId))
+  });
+  return analysis ?? null;
+}
+
+export async function getConversationAnalysisById(analysisId: string, userId: string): Promise<ConversationAnalysis | null> {
+  const analysis = await getDb().query.conversationAnalyses.findFirst({
+    where: and(eq(conversationAnalyses.id, analysisId), eq(conversationAnalyses.userId, userId))
+  });
+  return analysis ?? null;
+}
+
+export async function createConversationAnalysis(input: {
+  sessionId: string;
+  userId: string;
+  analysis: ConversationAnalysisPayload;
+}): Promise<ConversationAnalysis> {
+  const [analysis] = await getDb()
+    .insert(conversationAnalyses)
+    .values({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      encouragement: input.analysis.encouragement,
+      weakPoints: input.analysis.weakPoints
+    })
+    .returning();
+  return analysis;
+}
+
+export async function getExerciseSetByWeakPoint(input: {
+  analysisId: string;
+  weakPointId: string;
+  userId: string;
+}): Promise<ExerciseSet | null> {
+  const set = await getDb().query.exerciseSets.findFirst({
+    where: and(
+      eq(exerciseSets.analysisId, input.analysisId),
+      eq(exerciseSets.weakPointId, input.weakPointId),
+      eq(exerciseSets.userId, input.userId)
+    )
+  });
+  return set ?? null;
+}
+
+export async function createExerciseSet(input: {
+  analysisId: string;
+  userId: string;
+  weakPointId: string;
+  theory: Theory;
+  exercises: Exercise[];
+}): Promise<ExerciseSet> {
+  const [set] = await getDb()
+    .insert(exerciseSets)
+    .values({
+      analysisId: input.analysisId,
+      userId: input.userId,
+      weakPointId: input.weakPointId,
+      theory: input.theory,
+      exercises: input.exercises
+    })
+    .returning();
+  return set;
+}
+
+export async function completeExerciseSet(input: {
+  exerciseSetId: string;
+  userId: string;
+  score: number;
+}): Promise<ExerciseSet | null> {
+  const [set] = await getDb()
+    .update(exerciseSets)
+    .set({ score: input.score, completedAt: new Date() })
+    .where(and(eq(exerciseSets.id, input.exerciseSetId), eq(exerciseSets.userId, input.userId)))
+    .returning();
+  return set ?? null;
 }
 
 export async function getUserRecentSessions(userId: string, limit = 10) {

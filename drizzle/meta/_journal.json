@@ -43,6 +43,13 @@
       "when": 1780519369111,
       "tag": "0005_purple_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780687717539,
+      "tag": "0006_grey_kree",
+      "breakpoints": true
     }
   ]
 }
