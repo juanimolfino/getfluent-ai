@@ -16,6 +16,58 @@ async function getCheckoutSessionPriceId(sessionId: string) {
   return typeof price === "string" ? price : price?.id ?? null;
 }
 
+type InvoiceWithSubscriptionContext = Stripe.Invoice & {
+  subscription?: string | Stripe.Subscription | null;
+  parent?: {
+    subscription_details?: {
+      subscription?: string | null;
+      metadata?: Stripe.Metadata | null;
+    } | null;
+  } | null;
+  lines?: {
+    data?: Array<{
+      metadata?: Stripe.Metadata | null;
+      parent?: {
+        subscription_item_details?: {
+          subscription?: string | null;
+        } | null;
+      } | null;
+    }>;
+  };
+};
+
+function getInvoiceSubscriptionContext(invoice: InvoiceWithSubscriptionContext) {
+  const legacySubscription = typeof invoice.subscription === "string"
+    ? invoice.subscription
+    : invoice.subscription?.id;
+  const parentDetails = invoice.parent?.subscription_details;
+  const line = invoice.lines?.data?.[0];
+
+  return {
+    subscriptionId:
+      legacySubscription ??
+      parentDetails?.subscription ??
+      line?.parent?.subscription_item_details?.subscription ??
+      null,
+    metadata: parentDetails?.metadata ?? line?.metadata ?? {}
+  };
+}
+
+function getSubscriptionPeriod(subscription: Stripe.Subscription & {
+  current_period_start?: number;
+  current_period_end?: number;
+}) {
+  const item = subscription.items.data[0] as Stripe.SubscriptionItem & {
+    current_period_start?: number;
+    current_period_end?: number;
+  };
+
+  return {
+    periodStart: subscription.current_period_start ?? item?.current_period_start ?? null,
+    periodEnd: subscription.current_period_end ?? item?.current_period_end ?? null
+  };
+}
+
 export async function POST(request: Request) {
   const payload = await request.text();
   const signature = request.headers.get("stripe-signature");
@@ -51,27 +103,26 @@ export async function POST(request: Request) {
   }
 
   if (event.type === "invoice.paid") {
-    const invoice = event.data.object as Stripe.Invoice & {
-      subscription?: string | Stripe.Subscription | null;
-    };
-    const subscriptionId = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
+    const invoice = event.data.object as InvoiceWithSubscriptionContext;
+    const { subscriptionId, metadata: invoiceMetadata } = getInvoiceSubscriptionContext(invoice);
     if (subscriptionId) {
       const subscription = (await getStripe().subscriptions.retrieve(subscriptionId)) as Stripe.Subscription & {
         current_period_start?: number;
         current_period_end?: number;
       };
-      const userId = subscription.metadata.userId;
+      const userId = subscription.metadata.userId ?? invoiceMetadata.userId;
       if (userId) {
-        const priceId = subscription.metadata.priceId || subscription.items.data[0]?.price.id;
+        const priceId = subscription.metadata.priceId || invoiceMetadata.priceId || subscription.items.data[0]?.price.id;
         if (!priceId) return NextResponse.json({ error: "Missing subscription price" }, { status: 400 });
         const priceMetadata = await getStripePriceCreditMetadata(priceId);
         if (priceMetadata.type !== "subscription") return NextResponse.json({ error: "Invalid subscription price metadata" }, { status: 400 });
 
-        const periodStart = subscription.current_period_start
-          ? new Date(subscription.current_period_start * 1000)
+        const period = getSubscriptionPeriod(subscription);
+        const periodStart = period.periodStart
+          ? new Date(period.periodStart * 1000)
           : null;
-        const periodEnd = subscription.current_period_end
-          ? new Date(subscription.current_period_end * 1000)
+        const periodEnd = period.periodEnd
+          ? new Date(period.periodEnd * 1000)
           : null;
         await resetSubscriptionCredits(userId, priceMetadata.credits, {
           kind: "subscription",
@@ -81,7 +132,7 @@ export async function POST(request: Request) {
         }, event.id);
         await getDb().insert(subscriptions).values({
           userId,
-          plan: subscription.metadata.plan ?? "pro",
+          plan: subscription.metadata.plan ?? invoiceMetadata.plan ?? "pro",
           status: subscription.status,
           stripeSubscriptionId: subscription.id,
           currentPeriodStart: periodStart,

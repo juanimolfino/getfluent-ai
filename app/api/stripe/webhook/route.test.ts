@@ -151,6 +151,66 @@ describe("POST /api/stripe/webhook", () => {
     expect(mockAddPackCredits).not.toHaveBeenCalled();
   });
 
+  it("resets subscription credits from invoice.paid parent subscription details on newer Stripe API versions", async () => {
+    constructEvent.mockReturnValue({
+      id: "evt_invoice_new_shape",
+      type: "invoice.paid",
+      data: {
+        object: {
+          parent: {
+            type: "subscription_details",
+            subscription_details: {
+              subscription: "sub_new",
+              metadata: { userId: "user-1", plan: "starter", priceId: "price_starter" }
+            }
+          },
+          lines: {
+            data: [
+              {
+                metadata: { userId: "user-1", plan: "starter", priceId: "price_starter" },
+                parent: {
+                  type: "subscription_item_details",
+                  subscription_item_details: { subscription: "sub_new" }
+                }
+              }
+            ]
+          },
+          amount_paid: 890
+        }
+      }
+    });
+    retrieveSubscription.mockResolvedValue({
+      id: "sub_new",
+      status: "active",
+      cancel_at_period_end: false,
+      current_period_start: 1_700_000_000,
+      current_period_end: 1_702_592_000,
+      metadata: {},
+      items: { data: [{ price: { id: "price_starter" } }] }
+    });
+    mockGetStripePriceCreditMetadata.mockResolvedValue({
+      priceId: "price_starter",
+      productId: "prod_starter",
+      productName: "Fluent Starter",
+      credits: 15,
+      type: "subscription",
+      unitAmount: 890,
+      currency: "usd",
+      recurringInterval: "month"
+    });
+
+    const response = await POST(webhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockResetSubscriptionCredits).toHaveBeenCalledWith("user-1", 15, {
+      kind: "subscription",
+      subscriptionId: "sub_new",
+      priceId: "price_starter",
+      amountCents: 890
+    }, "evt_invoice_new_shape");
+    expect(mockAddPackCredits).not.toHaveBeenCalled();
+  });
+
   it("rejects unsigned webhooks before granting credits", async () => {
     const response = await POST(new Request("http://localhost:3000/api/stripe/webhook", {
       method: "POST",
