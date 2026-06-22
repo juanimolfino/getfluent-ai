@@ -19,9 +19,12 @@ const required = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
-  "STRIPE_PRICE_ID_CREDITS_10",
-  "STRIPE_PRICE_ID_CREDITS_50",
+  "STRIPE_PRICE_ID_STARTER_MONTHLY",
+  "STRIPE_PRICE_ID_PLUS_MONTHLY",
   "STRIPE_PRICE_ID_PRO_MONTHLY",
+  "STRIPE_PRICE_ID_PACK_MINI",
+  "STRIPE_PRICE_ID_PACK_MEDIO",
+  "STRIPE_PRICE_ID_PACK_BIG",
   "FAL_KEY",
   "OPENAI_API_KEY",
   "UPSTASH_REDIS_REST_URL",
@@ -117,9 +120,12 @@ await check("Stripe configured price IDs exist", async () => {
     apiVersion: "2025-08-27.basil"
   });
   await Promise.all([
-    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_CREDITS_10")),
-    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_CREDITS_50")),
-    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_PRO_MONTHLY"))
+    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_STARTER_MONTHLY")),
+    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_PLUS_MONTHLY")),
+    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_PRO_MONTHLY")),
+    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_PACK_MINI")),
+    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_PACK_MEDIO")),
+    stripe.prices.retrieve(cleanEnv("STRIPE_PRICE_ID_PACK_BIG"))
   ]);
 });
 

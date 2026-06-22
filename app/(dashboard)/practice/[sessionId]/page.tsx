@@ -1,8 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { ConversationView } from "@/components/fluent/conversation-view";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 
 export const metadata = { title: "Conversation" };
 
@@ -17,7 +16,7 @@ export default async function ConversationPage({ params }: ConversationPageProps
   const { sessionId } = await params;
   const session = await getSessionState(sessionId, user.id);
   if (!session) notFound();
-  const isPremium = await isPremiumUser(user.id);
+  if (!hasPaidConversationCredit(session)) notFound();
 
   return (
     <ConversationView
@@ -27,7 +26,7 @@ export default async function ConversationPage({ params }: ConversationPageProps
       targetTurns={session.targetTurns}
       completedTurns={session.completedTurns}
       isComplete={session.status === "completed" || session.status === "analyzed"}
-      isPremium={isPremium}
+      isPremium={true}
       premiumSttProvider={process.env.NEXT_PUBLIC_PREMIUM_STT_PROVIDER}
       initialTurns={session.turns}
     />

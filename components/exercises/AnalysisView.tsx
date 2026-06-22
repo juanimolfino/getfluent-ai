@@ -16,6 +16,9 @@ type AnalyzeResponse = {
   analysis: ConversationAnalysis;
 };
 
+const analysisCache = new Map<string, ConversationAnalysis>();
+const analysisRequestCache = new Map<string, Promise<ConversationAnalysis>>();
+
 const CATEGORY_META: Record<WeakPointCategory, { label: string; icon: typeof BookOpen; tone: string }> = {
   grammar: { label: "Grammar", icon: BookOpen, tone: "text-blue-700 bg-blue-50 border-blue-100" },
   vocabulary: { label: "Vocabulary", icon: Sparkles, tone: "text-purple-700 bg-purple-50 border-purple-100" },
@@ -24,13 +27,16 @@ const CATEGORY_META: Record<WeakPointCategory, { label: string; icon: typeof Boo
 };
 
 export function AnalysisView({ sessionId, topic, initialAnalysis }: AnalysisViewProps) {
-  const [analysis, setAnalysis] = useState<ConversationAnalysis | null>(initialAnalysis);
+  const cachedInitialAnalysis = initialAnalysis ?? analysisCache.get(sessionId) ?? null;
+  const [analysis, setAnalysis] = useState<ConversationAnalysis | null>(cachedInitialAnalysis);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(!initialAnalysis);
+  const [isLoading, setIsLoading] = useState(!cachedInitialAnalysis);
 
   useEffect(() => {
-    if (initialAnalysis) {
-      setAnalysis(initialAnalysis);
+    const cached = initialAnalysis ?? analysisCache.get(sessionId);
+    if (cached) {
+      analysisCache.set(sessionId, cached);
+      setAnalysis(cached);
       setIsLoading(false);
       return;
     }
@@ -42,15 +48,25 @@ export function AnalysisView({ sessionId, topic, initialAnalysis }: AnalysisView
       setError(null);
 
       try {
-        const response = await fetch("/api/conversation/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId })
-        });
-        if (!response.ok) throw new Error("No pudimos analizar la conversación todavía.");
+        let request = analysisRequestCache.get(sessionId);
+        if (!request) {
+          request = fetch("/api/conversation/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId })
+          }).then(async (response) => {
+            if (!response.ok) throw new Error("No pudimos analizar la conversación todavía.");
+            const data = (await response.json()) as AnalyzeResponse;
+            analysisCache.set(sessionId, data.analysis);
+            return data.analysis;
+          }).finally(() => {
+            analysisRequestCache.delete(sessionId);
+          });
+          analysisRequestCache.set(sessionId, request);
+        }
 
-        const data = (await response.json()) as AnalyzeResponse;
-        if (!cancelled) setAnalysis(data.analysis);
+        const nextAnalysis = await request;
+        if (!cancelled) setAnalysis(nextAnalysis);
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Algo salió mal.");
       } finally {
@@ -62,7 +78,7 @@ export function AnalysisView({ sessionId, topic, initialAnalysis }: AnalysisView
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, initialAnalysis]);
 
   if (isLoading) {
     return (

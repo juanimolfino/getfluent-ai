@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PremiumAudioTest } from "@/components/fluent/premium-audio-test";
 import { Button } from "@/components/ui/button";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 
 export const metadata = { title: "Premium audio test" };
 
@@ -19,6 +19,7 @@ export default async function PremiumAudioTestPage({ params }: PremiumAudioTestP
   const { sessionId } = await params;
   const session = await getSessionState(sessionId, user.id);
   if (!session) notFound();
+  if (!hasPaidConversationCredit(session)) notFound();
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">

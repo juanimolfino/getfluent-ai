@@ -1,9 +1,11 @@
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
+  credits,
   conversationAnalyses,
   conversationSessions,
   exerciseSets,
+  transactions,
   userLanguageProfiles,
   type ConversationAnalysis,
   type ConversationTurn,
@@ -20,6 +22,8 @@ type LanguageProfileInput = {
   interests: string[];
   preferredTopics: string[];
 };
+
+export const INSUFFICIENT_CREDITS_ERROR = "INSUFFICIENT_CREDITS";
 
 export async function getUserLanguageProfile(userId: string) {
   const profile = await getDb().query.userLanguageProfiles.findFirst({
@@ -78,6 +82,66 @@ export async function createConversationSession(data: {
     })
     .returning();
   return session;
+}
+
+export async function createPaidConversationSession(data: {
+  userId: string;
+  englishLevel: EnglishLevel;
+  topic: string;
+  targetTurns: number;
+}) {
+  const db = getDb();
+  return db.transaction(async (tx) => {
+    const [creditRow] = await tx
+      .select()
+      .from(credits)
+      .where(and(eq(credits.userId, data.userId), sql`${credits.creditsSubscription} + ${credits.creditsPack} >= 1`))
+      .for("update");
+
+    if (!creditRow) throw new Error(INSUFFICIENT_CREDITS_ERROR);
+
+    const subscriptionDebit = Math.min(creditRow.creditsSubscription, 1);
+    const packDebit = 1 - subscriptionDebit;
+
+    await tx
+      .update(credits)
+      .set({
+        creditsSubscription: sql`${credits.creditsSubscription} - ${subscriptionDebit}`,
+        creditsPack: sql`${credits.creditsPack} - ${packDebit}`,
+        updatedAt: new Date()
+      })
+      .where(eq(credits.userId, data.userId));
+
+    const [session] = await tx
+      .insert(conversationSessions)
+      .values({
+        userId: data.userId,
+        status: "active",
+        englishLevel: data.englishLevel,
+        topic: data.topic,
+        targetTurns: data.targetTurns,
+        completedTurns: 0,
+        turns: [],
+        creditsUsed: 1
+      })
+      .returning();
+
+    await tx.insert(transactions).values({
+      userId: data.userId,
+      type: "credit_spend",
+      credits: -1,
+      metadata: {
+        sessionId: session.id,
+        reason: "conversation_start",
+        debit: {
+          subscription: subscriptionDebit,
+          pack: packDebit
+        }
+      }
+    });
+
+    return session;
+  });
 }
 
 export async function getConversationSession(sessionId: string, userId: string) {

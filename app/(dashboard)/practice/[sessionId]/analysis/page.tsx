@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { AnalysisView } from "@/components/exercises/AnalysisView";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 import { getConversationAnalysisBySession } from "@/lib/db/fluent-queries";
 
 export const metadata = { title: "Conversation analysis" };
@@ -22,6 +22,7 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
     getConversationAnalysisBySession(sessionId, user.id)
   ]);
   if (!session) notFound();
+  if (!hasPaidConversationCredit(session)) notFound();
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">

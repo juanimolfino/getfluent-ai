@@ -27,7 +27,7 @@ export async function ensureUserProfile(authUser: User) {
     if (!profile) throw new Error("Could not create user profile");
 
     if (created) {
-      await tx.insert(credits).values({ userId: profile.id, balance: signupCredits }).onConflictDoNothing();
+      await tx.insert(credits).values({ userId: profile.id, creditsPack: signupCredits }).onConflictDoNothing();
       await tx.insert(subscriptions).values({ userId: profile.id, plan: "free", status: "active" });
       await tx.insert(transactions).values({
         userId: profile.id,
@@ -53,7 +53,12 @@ export async function getDashboard(userId: string) {
   ]);
 
   return {
-    credits: creditRow?.balance ?? 0,
+    credits: (creditRow?.creditsSubscription ?? 0) + (creditRow?.creditsPack ?? 0),
+    creditBalance: {
+      subscription: creditRow?.creditsSubscription ?? 0,
+      pack: creditRow?.creditsPack ?? 0,
+      total: (creditRow?.creditsSubscription ?? 0) + (creditRow?.creditsPack ?? 0)
+    },
     subscription: subscriptionRows[0] ?? null,
     jobs: jobRows
   };
@@ -70,14 +75,21 @@ export async function createPendingJob(input: {
     const [creditRow] = await tx
       .select()
       .from(credits)
-      .where(and(eq(credits.userId, input.userId), sql`${credits.balance} >= ${input.creditsUsed}`))
+      .where(and(eq(credits.userId, input.userId), sql`${credits.creditsSubscription} + ${credits.creditsPack} >= ${input.creditsUsed}`))
       .for("update");
 
     if (!creditRow) throw new Error("INSUFFICIENT_CREDITS");
 
+    const subscriptionDebit = Math.min(creditRow.creditsSubscription, input.creditsUsed);
+    const packDebit = input.creditsUsed - subscriptionDebit;
+
     await tx
       .update(credits)
-      .set({ balance: sql`${credits.balance} - ${input.creditsUsed}`, updatedAt: new Date() })
+      .set({
+        creditsSubscription: sql`${credits.creditsSubscription} - ${subscriptionDebit}`,
+        creditsPack: sql`${credits.creditsPack} - ${packDebit}`,
+        updatedAt: new Date()
+      })
       .where(eq(credits.userId, input.userId));
 
     const [job] = await tx
@@ -120,7 +132,7 @@ export async function refundJobCredits(jobId: string, reason: string) {
     if (refund) {
       await tx
         .update(credits)
-        .set({ balance: sql`${credits.balance} + ${job.creditsUsed}`, updatedAt: new Date() })
+        .set({ creditsPack: sql`${credits.creditsPack} + ${job.creditsUsed}`, updatedAt: new Date() })
         .where(eq(credits.userId, job.userId));
     }
 
@@ -146,13 +158,20 @@ export async function getJobForUser(jobId: string, userId: string) {
   return getDb().query.jobs.findFirst({ where: and(eq(jobs.id, jobId), eq(jobs.userId, userId)) });
 }
 
-export async function addCredits(userId: string, amount: number, metadata: Record<string, unknown>, stripeEventId?: string) {
+export async function getUserCreditBalance(userId: string) {
+  const creditRow = await getDb().query.credits.findFirst({ where: eq(credits.userId, userId) });
+  const subscription = creditRow?.creditsSubscription ?? 0;
+  const pack = creditRow?.creditsPack ?? 0;
+  return { subscription, pack, total: subscription + pack };
+}
+
+export async function addPackCredits(userId: string, amount: number, metadata: Record<string, unknown>, stripeEventId?: string) {
   const db = getDb();
   const profile = await db.query.users.findFirst({ where: eq(users.id, userId) });
   const applied = await db.transaction(async (tx) => {
     const [transaction] = await tx.insert(transactions).values({
       userId,
-      type: metadata.kind === "subscription" ? "subscription_payment" : "credit_purchase",
+      type: "credit_purchase",
       credits: amount,
       amountCents: typeof metadata.amountCents === "number" ? metadata.amountCents : null,
       stripeEventId,
@@ -163,13 +182,43 @@ export async function addCredits(userId: string, amount: number, metadata: Recor
 
     await tx
       .insert(credits)
-      .values({ userId, balance: amount })
+      .values({ userId, creditsPack: amount })
       .onConflictDoUpdate({
         target: credits.userId,
-        set: { balance: sql`${credits.balance} + ${amount}`, updatedAt: new Date() }
+        set: { creditsPack: sql`${credits.creditsPack} + ${amount}`, updatedAt: new Date() }
       });
 
     return true;
   });
   if (applied && profile?.email && amount > 0) await sendPurchaseConfirmationEmail(profile.email, amount);
 }
+
+export async function resetSubscriptionCredits(userId: string, amount: number, metadata: Record<string, unknown>, stripeEventId?: string) {
+  const db = getDb();
+  const profile = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  const applied = await db.transaction(async (tx) => {
+    const [transaction] = await tx.insert(transactions).values({
+      userId,
+      type: "subscription_payment",
+      credits: amount,
+      amountCents: typeof metadata.amountCents === "number" ? metadata.amountCents : null,
+      stripeEventId,
+      metadata
+    }).onConflictDoNothing().returning({ id: transactions.id });
+
+    if (!transaction) return false;
+
+    await tx
+      .insert(credits)
+      .values({ userId, creditsSubscription: amount, creditsPack: 0 })
+      .onConflictDoUpdate({
+        target: credits.userId,
+        set: { creditsSubscription: amount, updatedAt: new Date() }
+      });
+
+    return true;
+  });
+  if (applied && profile?.email && amount > 0) await sendPurchaseConfirmationEmail(profile.email, amount);
+}
+
+export const addCredits = addPackCredits;

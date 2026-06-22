@@ -34,13 +34,119 @@ type RateLimitResult = {
   windowSeconds?: number;
 };
 
+export type ExpensiveEndpointRateLimitKind =
+  | "conversation"
+  | "analysis"
+  | "exercise_generation"
+  | "speech_check"
+  | "tts"
+  | "translation";
+
+export type MonthlyUsageLimitKind =
+  | "conversation"
+  | "analysis"
+  | "exercise_generation"
+  | "speech_check"
+  | "translation"
+  | "tts";
+
+export class RateLimitConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RateLimitConfigurationError";
+  }
+}
+
+const EXPENSIVE_ENDPOINT_LIMITS: Record<ExpensiveEndpointRateLimitKind, {
+  envMax: string;
+  envWindow: string;
+  fallbackMax: number;
+  fallbackWindowSeconds: number;
+}> = {
+  conversation: {
+    envMax: "CONVERSATION_TURNS_PER_USER_PER_WINDOW",
+    envWindow: "CONVERSATION_RATE_LIMIT_WINDOW_SECONDS",
+    fallbackMax: 5,
+    fallbackWindowSeconds: 60
+  },
+  analysis: {
+    envMax: "CONVERSATION_ANALYSES_PER_USER_PER_WINDOW",
+    envWindow: "CONVERSATION_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS",
+    fallbackMax: 4,
+    fallbackWindowSeconds: 60
+  },
+  exercise_generation: {
+    envMax: "EXERCISE_GENERATIONS_PER_USER_PER_WINDOW",
+    envWindow: "EXERCISE_GENERATION_RATE_LIMIT_WINDOW_SECONDS",
+    fallbackMax: 4,
+    fallbackWindowSeconds: 60
+  },
+  speech_check: {
+    envMax: "EXERCISE_SPEECH_CHECKS_PER_USER_PER_WINDOW",
+    envWindow: "EXERCISE_SPEECH_CHECK_RATE_LIMIT_WINDOW_SECONDS",
+    fallbackMax: 20,
+    fallbackWindowSeconds: 60
+  },
+  tts: {
+    envMax: "EXERCISE_TTS_REQUESTS_PER_USER_PER_WINDOW",
+    envWindow: "EXERCISE_TTS_RATE_LIMIT_WINDOW_SECONDS",
+    fallbackMax: 10,
+    fallbackWindowSeconds: 60
+  },
+  translation: {
+    envMax: "TRANSLATION_REQUESTS_PER_USER_PER_WINDOW",
+    envWindow: "TRANSLATION_RATE_LIMIT_WINDOW_SECONDS",
+    fallbackMax: 10,
+    fallbackWindowSeconds: 60
+  }
+};
+
+const MONTHLY_USAGE_LIMITS: Record<MonthlyUsageLimitKind, {
+  envMax: string;
+  fallbackMax: number;
+}> = {
+  conversation: {
+    envMax: "MONTHLY_CONVERSATION_TURNS_PER_USER",
+    fallbackMax: 600
+  },
+  analysis: {
+    envMax: "MONTHLY_CONVERSATION_ANALYSES_PER_USER",
+    fallbackMax: 60
+  },
+  exercise_generation: {
+    envMax: "MONTHLY_EXERCISE_GENERATIONS_PER_USER",
+    fallbackMax: 120
+  },
+  speech_check: {
+    envMax: "MONTHLY_EXERCISE_SPEECH_CHECKS_PER_USER",
+    fallbackMax: 300
+  },
+  translation: {
+    envMax: "MONTHLY_TRANSLATION_REQUESTS_PER_USER",
+    fallbackMax: 300
+  },
+  tts: {
+    envMax: "MONTHLY_EXERCISE_TTS_REQUESTS_PER_USER",
+    fallbackMax: 250
+  }
+};
+
+function assertRateLimitConfigured() {
+  if (hasRedisConfig()) return true;
+  if (process.env.NODE_ENV === "production") {
+    console.error("[rate-limit] Upstash Redis is required in production. Refusing to run without abuse protection.");
+    throw new RateLimitConfigurationError("Upstash Redis is required in production");
+  }
+  return false;
+}
+
 async function checkFixedWindowLimit(options: {
   key: string;
   max: number;
   windowSeconds: number;
   scope: "user" | "session";
 }): Promise<RateLimitResult> {
-  if (!hasRedisConfig()) return { limited: false, configured: false };
+  if (!assertRateLimitConfigured()) return { limited: false, configured: false };
 
   const client = getRedis();
   const count = await client.incr(options.key);
@@ -54,6 +160,46 @@ async function checkFixedWindowLimit(options: {
     max: options.max,
     windowSeconds: options.windowSeconds
   };
+}
+
+export function isRateLimitConfigurationError(error: unknown) {
+  return error instanceof RateLimitConfigurationError;
+}
+
+export async function checkExpensiveEndpointRateLimit(input: {
+  userId: string;
+  kind: ExpensiveEndpointRateLimitKind;
+}): Promise<RateLimitResult> {
+  const config = EXPENSIVE_ENDPOINT_LIMITS[input.kind];
+  const windowSeconds = parsePositiveInteger(process.env[config.envWindow], config.fallbackWindowSeconds);
+  const max = parsePositiveInteger(process.env[config.envMax], config.fallbackMax);
+
+  return checkFixedWindowLimit({
+    key: `rate:${input.kind}:user:${input.userId}`,
+    max,
+    windowSeconds,
+    scope: "user"
+  });
+}
+
+function getCurrentMonthKey() {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export async function checkMonthlyUsageLimit(input: {
+  userId: string;
+  kind: MonthlyUsageLimitKind;
+}): Promise<RateLimitResult> {
+  const config = MONTHLY_USAGE_LIMITS[input.kind];
+  const max = parsePositiveInteger(process.env[config.envMax], config.fallbackMax);
+
+  return checkFixedWindowLimit({
+    key: `monthly:${input.kind}:${getCurrentMonthKey()}:user:${input.userId}`,
+    max,
+    windowSeconds: 60 * 60 * 24 * 32,
+    scope: "user"
+  });
 }
 
 export async function checkSttTokenGrantRateLimit(input: {
@@ -77,6 +223,20 @@ export async function checkSttTokenGrantRateLimit(input: {
     max: maxSessionGrants,
     windowSeconds,
     scope: "session"
+  });
+}
+
+export async function checkSttMetricsRateLimit(input: {
+  userId: string;
+}): Promise<RateLimitResult> {
+  const windowSeconds = parsePositiveInteger(process.env.STT_METRICS_RATE_LIMIT_WINDOW_SECONDS, 60);
+  const max = parsePositiveInteger(process.env.STT_METRICS_PER_USER_PER_WINDOW, 60);
+
+  return checkFixedWindowLimit({
+    key: `stt:metrics:user:${input.userId}`,
+    max,
+    windowSeconds,
+    scope: "user"
   });
 }
 

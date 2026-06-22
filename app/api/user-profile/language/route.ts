@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { getUserLanguageProfile, upsertUserLanguageProfile } from "@/lib/db/fluent-queries";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 
 const languageProfileSchema = z.object({
   nativeLanguage: z.enum(["spanish", "portuguese", "french", "italian", "german", "other"]).default("spanish"),
@@ -25,6 +26,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const originResponse = rejectForbiddenOrigin(request, "user_profile_language");
+    if (originResponse) return originResponse;
+
     const user = await getCurrentUserProfile();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

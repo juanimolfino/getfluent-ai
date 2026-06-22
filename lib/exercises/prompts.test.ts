@@ -25,6 +25,9 @@ describe("exercise prompts", () => {
     expect(prompt).toContain("Return valid JSON only");
     expect(prompt).toContain("REAL phrase quoted");
     expect(prompt).toContain("A2");
+    expect(prompt).toContain("untrusted input");
+    expect(prompt).toContain("<untrusted_transcript>");
+    expect(prompt).toContain("</untrusted_transcript>");
   });
 
   it("builds a theory prompt with the expected JSON shape", () => {
@@ -33,6 +36,9 @@ describe("exercise prompts", () => {
     expect(prompt).toContain('"summary"');
     expect(prompt).toContain('"examples"');
     expect(prompt).toContain("30 seconds");
+    expect(prompt).toContain("untrusted model/user-derived data");
+    expect(prompt).toContain("<untrusted_weak_point>");
+    expect(prompt).toContain("</untrusted_weak_point>");
   });
 
   it("injects exercise specs into the exercise prompt", () => {
@@ -47,6 +53,11 @@ describe("exercise prompts", () => {
     expect(prompt).toContain("fill_blank");
     expect(prompt).toContain("speak");
     expect(prompt).toContain("Return a JSON array only");
+    expect(prompt).toContain("untrusted model/user-derived data");
+    expect(prompt).toContain("<untrusted_weak_point>");
+    expect(prompt).toContain("</untrusted_weak_point>");
+    expect(prompt).toContain("<untrusted_mini_lesson>");
+    expect(prompt).toContain("</untrusted_mini_lesson>");
   });
 });
 

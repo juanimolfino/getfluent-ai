@@ -10,7 +10,8 @@ vi.mock("@/lib/auth/current-user", () => ({
 }));
 
 vi.mock("@/lib/conversation/session-state", () => ({
-  getSessionState: vi.fn()
+  getSessionState: vi.fn(),
+  hasPaidConversationCredit: vi.fn((session: { creditsUsed?: number } | null | undefined) => Boolean(session && (session.creditsUsed ?? 0) >= 1))
 }));
 
 vi.mock("@/lib/db/fluent-queries", () => ({
@@ -47,6 +48,7 @@ describe("POST /api/conversation/translate", () => {
     mockGetSessionState.mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
       userId: "user-1",
+      creditsUsed: 1,
       turns: [
         { role: "assistant", content: "Tell me about your day.", timestamp: "2026-01-01T00:00:00.000Z" },
         { role: "user", content: "It was good.", timestamp: "2026-01-01T00:00:01.000Z" }

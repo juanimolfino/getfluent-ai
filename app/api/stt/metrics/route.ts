@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
-import { getSessionState, incrementSttAudioMsUsed } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit, incrementSttAudioMsUsed } from "@/lib/conversation/session-state";
 import {
   STT_METRIC_EVENTS,
   buildSttMetricLogLine,
@@ -10,6 +9,7 @@ import {
   shouldIncrementSttAudioUsage
 } from "@/lib/conversation/stt-metrics";
 import { isAllowedRequestOrigin } from "@/lib/http/origin";
+import { checkSttMetricsRateLimit, isRateLimitConfigurationError } from "@/lib/redis/rate-limit";
 
 const speechInputProviderSchema = z.enum(["browser_speech_recognition", "deepgram_flux"]);
 const sttMetricEventSchema = z.enum(STT_METRIC_EVENTS);
@@ -60,6 +60,14 @@ export async function POST(request: Request) {
     const user = await getCurrentUserProfile();
     if (!user) return jsonNoStore({ error: "Unauthorized" }, { status: 401 });
 
+    const rateLimit = await checkSttMetricsRateLimit({ userId: user.id });
+    if (rateLimit.limited) {
+      console.warn(
+        `[stt-metric] rate limited userId=${user.id} count=${rateLimit.count ?? "unknown"} max=${rateLimit.max ?? "unknown"} window=${rateLimit.windowSeconds ?? "unknown"}s`
+      );
+      return jsonNoStore({ error: "Too many metric requests" }, { status: 429 });
+    }
+
     const body = await request.json();
     const parsed = sttMetricsPayloadSchema.safeParse(body);
     if (!parsed.success) {
@@ -75,10 +83,8 @@ export async function POST(request: Request) {
     const [sessionId] = [...sessionIds];
     const session = await getSessionState(sessionId, user.id);
     if (!session) return jsonNoStore({ error: "Session not found" }, { status: 404 });
-
-    const premiumUser = await isPremiumUser(user.id);
-    if (metrics.some((metric) => metric.provider === "deepgram_flux") && !premiumUser) {
-      return jsonNoStore({ error: "Premium subscription required" }, { status: 403 });
+    if (!hasPaidConversationCredit(session)) {
+      return jsonNoStore({ error: "No paid conversation credit found for this session" }, { status: 402 });
     }
 
     let audioMsToIncrement = 0;
@@ -88,7 +94,7 @@ export async function POST(request: Request) {
         ...item,
         userId: user.id,
         sessionId: session.id,
-        isPremium: premiumUser,
+        isPremium: true,
         fallbackReason: normalizeSttMetricText(item.fallbackReason, ""),
         errorCode: normalizeSttMetricText(item.errorCode, "")
       };
@@ -103,7 +109,10 @@ export async function POST(request: Request) {
     }
 
     return jsonNoStore({ ok: true }, { status: 202 });
-  } catch {
+  } catch (error) {
+    if (isRateLimitConfigurationError(error)) {
+      return jsonNoStore({ error: "Rate limiting is not configured" }, { status: 503 });
+    }
     console.error("[stt-metric] route failed");
     return jsonNoStore({ ok: false }, { status: 202 });
   }

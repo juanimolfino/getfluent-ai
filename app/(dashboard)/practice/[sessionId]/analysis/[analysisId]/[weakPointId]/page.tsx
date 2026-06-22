@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ExerciseSetView } from "@/components/exercises/ExerciseSetView";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 import { getConversationAnalysisById, getExerciseSetByWeakPoint } from "@/lib/db/fluent-queries";
 
 export const metadata = { title: "Practice point" };
@@ -22,10 +22,20 @@ export default async function PracticePointPage({ params }: PracticePointPagePro
     getConversationAnalysisById(analysisId, user.id),
     getExerciseSetByWeakPoint({ analysisId, weakPointId, userId: user.id })
   ]);
-  const weakPointExists = analysis?.weakPoints.some((point) => point.id === weakPointId) ?? false;
+  const analysisBelongsToSession = Boolean(session && analysis && analysis.sessionId === session.id);
+  const paidSession = hasPaidConversationCredit(session);
+  const weakPointExists = analysisBelongsToSession && (analysis?.weakPoints.some((point) => point.id === weakPointId) ?? false);
 
-  if (!session || !analysis || !weakPointExists) {
-    const reason = !session ? "Session not found for your user." : !analysis ? "Analysis not found for your user." : "Practice point not found in this analysis.";
+  if (!session || !paidSession || !analysis || !analysisBelongsToSession || !weakPointExists) {
+    const reason = !session
+      ? "Session not found for your user."
+      : !paidSession
+        ? "This practice session has no paid credit attached."
+        : !analysis
+          ? "Analysis not found for your user."
+          : !analysisBelongsToSession
+            ? "Analysis does not belong to this session."
+            : "Practice point not found in this analysis.";
 
     return (
       <main className="mx-auto max-w-4xl px-4 py-6">

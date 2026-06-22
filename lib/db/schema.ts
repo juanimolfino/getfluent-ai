@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -36,7 +37,8 @@ export const users = pgTable("users", {
 export const credits = pgTable("credits", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull().unique(),
-  balance: integer("balance").default(0).notNull(),
+  creditsSubscription: integer("credits_subscription").default(0).notNull(),
+  creditsPack: integer("credits_pack").default(0).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 });
 
@@ -133,7 +135,7 @@ export const conversationSessions = pgTable("conversation_sessions", {
   status: sessionStatusEnum("status").default("setup").notNull(),
   englishLevel: englishLevelEnum("english_level").notNull(),
   topic: text("topic").notNull(),
-  targetTurns: integer("target_turns").default(10).notNull(),
+  targetTurns: integer("target_turns").default(8).notNull(),
   completedTurns: integer("completed_turns").default(0).notNull(),
   turns: jsonb("turns").$type<ConversationTurn[]>().default(sql`'[]'::jsonb`).notNull(),
   transcript: text("transcript"),
@@ -142,7 +144,9 @@ export const conversationSessions = pgTable("conversation_sessions", {
   sttAudioMsUsed: integer("stt_audio_ms_used").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-});
+}, (table) => [
+  check("conversation_sessions_target_turns_range_check", sql`${table.targetTurns} >= 4 and ${table.targetTurns} <= 8`)
+]);
 
 export type UserLanguageProfile = typeof userLanguageProfiles.$inferSelect;
 export type ConversationSession = typeof conversationSessions.$inferSelect;

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 import { getConversationAnalysisById, getUserLanguageProfile } from "@/lib/db/fluent-queries";
+import { enforceExpensiveEndpointRateLimit, enforceMonthlyUsageLimit } from "@/lib/http/rate-limit";
 import type { NativeLanguage } from "@/lib/db/schema";
 
 const translateExerciseSchema = z.object({
@@ -32,15 +34,28 @@ export async function POST(request: Request) {
     const user = await getCurrentUserProfile();
     if (!user) return jsonNoStore({ error: "Unauthorized" }, { status: 401 });
 
+    const rateLimitResponse = await enforceExpensiveEndpointRateLimit({ userId: user.id, kind: "translation" });
+    if (rateLimitResponse) return rateLimitResponse;
+
     const body = await request.json();
     const parsed = translateExerciseSchema.safeParse(body);
     if (!parsed.success) return jsonNoStore({ error: parsed.error.flatten() }, { status: 400 });
 
     const analysis = await getConversationAnalysisById(parsed.data.analysisId, user.id);
     if (!analysis) return jsonNoStore({ error: "Analysis not found" }, { status: 404 });
+
+    const session = await getSessionState(analysis.sessionId, user.id);
+    if (!session) return jsonNoStore({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return jsonNoStore({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
+
     if (!analysis.weakPoints.some((point) => point.id === parsed.data.weakPointId)) {
       return jsonNoStore({ error: "Weak point not found" }, { status: 404 });
     }
+
+    const monthlyUsageResponse = await enforceMonthlyUsageLimit({ userId: user.id, kind: "translation" });
+    if (monthlyUsageResponse) return monthlyUsageResponse;
 
     const profile = await getUserLanguageProfile(user.id);
     const targetLanguage = LANGUAGE_LABELS[profile?.nativeLanguage ?? "spanish"];

@@ -47,6 +47,15 @@ describe("getDeepgramServerConfig", () => {
       })
     ).toThrow("DEEPGRAM_FLUX_EOT_THRESHOLD must be a number from 0.5 to 0.9");
   });
+
+  it("rejects temporary token TTLs longer than 60 seconds", () => {
+    expect(() =>
+      getDeepgramServerConfig({
+        DEEPGRAM_API_KEY: "server-key",
+        DEEPGRAM_TEMP_TOKEN_TTL_SECONDS: "61"
+      })
+    ).toThrow("DEEPGRAM_TEMP_TOKEN_TTL_SECONDS must be a number from 1 to 60");
+  });
 });
 
 describe("buildDeepgramFluxWebSocketUrl", () => {

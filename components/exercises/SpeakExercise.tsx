@@ -55,7 +55,7 @@ function getSpeechRecognition() {
   return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
 }
 
-export function SpeakExercise({ analysisId, weakPointId, exercise, onComplete }: Props) {
+export function SpeakExercise({ sessionId, analysisId, weakPointId, exercise, onComplete }: Props) {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const deepgramRef = useRef<SpeechToTextProvider | null>(null);
   const [transcript, setTranscript] = useState("");
@@ -97,6 +97,7 @@ export function SpeakExercise({ analysisId, weakPointId, exercise, onComplete }:
   async function startListening() {
     setError(null);
     const deepgram = createDeepgramFluxSpeechProvider({
+      sessionId,
       onPartialTranscript(payload) {
         setTranscript(payload.transcript);
       },

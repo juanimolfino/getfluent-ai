@@ -1,0 +1,164 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/lib/db";
+import { addPackCredits, resetSubscriptionCredits } from "@/lib/db/queries";
+import { getStripe } from "@/lib/stripe/client";
+import { getStripePriceCreditMetadata } from "@/lib/stripe/pricing";
+import { POST } from "@/app/api/stripe/webhook/route";
+
+vi.mock("@/lib/db", () => ({
+  getDb: vi.fn()
+}));
+
+vi.mock("@/lib/db/queries", () => ({
+  addPackCredits: vi.fn(),
+  resetSubscriptionCredits: vi.fn()
+}));
+
+vi.mock("@/lib/stripe/client", () => ({
+  getStripe: vi.fn()
+}));
+
+vi.mock("@/lib/stripe/pricing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/stripe/pricing")>();
+  return {
+    ...actual,
+    getStripePriceCreditMetadata: vi.fn()
+  };
+});
+
+const mockGetDb = vi.mocked(getDb);
+const mockAddPackCredits = vi.mocked(addPackCredits);
+const mockResetSubscriptionCredits = vi.mocked(resetSubscriptionCredits);
+const mockGetStripe = vi.mocked(getStripe);
+const mockGetStripePriceCreditMetadata = vi.mocked(getStripePriceCreditMetadata);
+
+function webhookRequest() {
+  return new Request("http://localhost:3000/api/stripe/webhook", {
+    method: "POST",
+    headers: { "stripe-signature": "valid-signature" },
+    body: "{}"
+  });
+}
+
+function mockDb() {
+  const where = vi.fn().mockResolvedValue(undefined);
+  const set = vi.fn(() => ({ where }));
+  const update = vi.fn(() => ({ set }));
+  const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+  const values = vi.fn(() => ({ onConflictDoUpdate }));
+  const insert = vi.fn(() => ({ values }));
+  mockGetDb.mockReturnValue({ update, insert } as unknown as ReturnType<typeof getDb>);
+  return { update, insert, values, onConflictDoUpdate };
+}
+
+describe("POST /api/stripe/webhook", () => {
+  const constructEvent = vi.fn();
+  const listLineItems = vi.fn();
+  const retrieveSubscription = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+    mockDb();
+    mockGetStripe.mockReturnValue({
+      webhooks: { constructEvent },
+      checkout: { sessions: { listLineItems } },
+      subscriptions: { retrieve: retrieveSubscription }
+    } as unknown as ReturnType<typeof getStripe>);
+  });
+
+  it("adds pack credits from checkout.session.completed using Stripe Price metadata and event id", async () => {
+    constructEvent.mockReturnValue({
+      id: "evt_pack_1",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_pack_1",
+          metadata: { userId: "user-1", kind: "pack" },
+          customer: "cus_1",
+          amount_total: 490
+        }
+      }
+    });
+    listLineItems.mockResolvedValue({
+      data: [{ price: { id: "price_pack_mini" } }]
+    });
+    mockGetStripePriceCreditMetadata.mockResolvedValue({
+      priceId: "price_pack_mini",
+      productId: "prod_pack_mini",
+      productName: "Pack Mini",
+      credits: 5,
+      type: "pack",
+      unitAmount: 490,
+      currency: "usd",
+      recurringInterval: null
+    });
+
+    const response = await POST(webhookRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ received: true });
+    expect(mockAddPackCredits).toHaveBeenCalledWith("user-1", 5, {
+      kind: "pack",
+      checkoutSessionId: "cs_pack_1",
+      priceId: "price_pack_mini",
+      amountCents: 490
+    }, "evt_pack_1");
+    expect(mockResetSubscriptionCredits).not.toHaveBeenCalled();
+  });
+
+  it("resets subscription credits from invoice.paid using Stripe Price metadata and event id", async () => {
+    constructEvent.mockReturnValue({
+      id: "evt_invoice_1",
+      type: "invoice.paid",
+      data: {
+        object: {
+          subscription: "sub_1",
+          amount_paid: 1490
+        }
+      }
+    });
+    retrieveSubscription.mockResolvedValue({
+      id: "sub_1",
+      status: "active",
+      cancel_at_period_end: false,
+      current_period_start: 1_700_000_000,
+      current_period_end: 1_702_592_000,
+      metadata: { userId: "user-1", plan: "plus", priceId: "price_plus" },
+      items: { data: [{ price: { id: "price_plus" } }] }
+    });
+    mockGetStripePriceCreditMetadata.mockResolvedValue({
+      priceId: "price_plus",
+      productId: "prod_plus",
+      productName: "Fluent Plus",
+      credits: 25,
+      type: "subscription",
+      unitAmount: 1490,
+      currency: "usd",
+      recurringInterval: "month"
+    });
+
+    const response = await POST(webhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockResetSubscriptionCredits).toHaveBeenCalledWith("user-1", 25, {
+      kind: "subscription",
+      subscriptionId: "sub_1",
+      priceId: "price_plus",
+      amountCents: 1490
+    }, "evt_invoice_1");
+    expect(mockAddPackCredits).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsigned webhooks before granting credits", async () => {
+    const response = await POST(new Request("http://localhost:3000/api/stripe/webhook", {
+      method: "POST",
+      body: "{}"
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mockAddPackCredits).not.toHaveBeenCalled();
+    expect(mockResetSubscriptionCredits).not.toHaveBeenCalled();
+  });
+});

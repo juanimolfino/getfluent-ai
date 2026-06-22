@@ -4,8 +4,10 @@ import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
 import { getConversationFollowUpDelta } from "@/lib/conversation/assistant-response";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
-import { getSessionState, markSessionComplete, saveAssistantTurn, saveUserTurn } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit, markSessionComplete, saveAssistantTurn, saveUserTurn } from "@/lib/conversation/session-state";
 import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
+import { enforceExpensiveEndpointRateLimit, enforceMonthlyUsageLimit } from "@/lib/http/rate-limit";
 import type { ConversationTurn } from "@/lib/db/schema";
 
 const conversationTurnSchema = z.object({
@@ -15,8 +17,14 @@ const conversationTurnSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const originResponse = rejectForbiddenOrigin(request, "conversation_turn");
+    if (originResponse) return originResponse;
+
     const user = await getCurrentUserProfile();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const rateLimitResponse = await enforceExpensiveEndpointRateLimit({ userId: user.id, kind: "conversation" });
+    if (rateLimitResponse) return rateLimitResponse;
 
     const body = await request.json();
     const parsed = conversationTurnSchema.safeParse(body);
@@ -24,8 +32,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
+    const monthlyUsageResponse = await enforceMonthlyUsageLimit({ userId: user.id, kind: "conversation" });
+    if (monthlyUsageResponse) return monthlyUsageResponse;
+
     const session = await getSessionState(parsed.data.sessionId, user.id);
     if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return NextResponse.json({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
     if (session.status !== "active") {
       return NextResponse.json({ error: "Session is not active" }, { status: 400 });
     }

@@ -1329,6 +1329,10 @@ body {
   color: var(--gf-ink);
 }
 .gf-page.gf-settings .setup-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 24px;
   border: 1px solid color-mix(in srgb, #b42318 30%, var(--gf-line));
   background: color-mix(in srgb, #b42318 6%, var(--gf-card));
@@ -1336,6 +1340,20 @@ body {
   border-radius: 13px;
   padding: 10px 14px;
   font-size: 14px;
+}
+.gf-page.gf-settings .setup-error p {
+  margin: 0;
+}
+.gf-page.gf-settings .setup-error-link {
+  border: 1px solid color-mix(in srgb, #b42318 30%, var(--gf-line));
+  background: var(--gf-card);
+  color: #b42318;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
 }
 .gf-page.gf-settings .side h3 {
   font-size: 16px;

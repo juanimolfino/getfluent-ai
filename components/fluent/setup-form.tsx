@@ -32,6 +32,10 @@ type SetupFormProps = {
   profile: UserLanguageProfile | null;
 };
 
+type StartConversationError = {
+  error?: unknown;
+};
+
 function parseList(value: string) {
   return value
     .split(",")
@@ -125,7 +129,20 @@ export function SetupForm({ profile }: SetupFormProps) {
         body: JSON.stringify({ topic: selectedTopic, englishLevel, targetTurns })
       });
 
-      if (!conversationResponse.ok) throw new Error("Could not start the conversation.");
+      if (!conversationResponse.ok) {
+        if (conversationResponse.status === 402) {
+          throw new Error("You are out of credits. Buy more credits to keep practicing and improving with Alex.");
+        }
+
+        let message = "Could not start the conversation.";
+        try {
+          const data = (await conversationResponse.json()) as StartConversationError;
+          if (typeof data.error === "string") message = data.error;
+        } catch {
+          // Keep the generic message.
+        }
+        throw new Error(message);
+      }
 
       const data = (await conversationResponse.json()) as { sessionId: string };
       router.push(`/practice/${data.sessionId}`);
@@ -247,7 +264,7 @@ export function SetupForm({ profile }: SetupFormProps) {
               className="ctrl"
               type="number"
               min={4}
-              max={30}
+              max={8}
               value={targetTurns}
               onChange={(event) => setTargetTurns(Number(event.target.value))}
             />
@@ -255,7 +272,16 @@ export function SetupForm({ profile }: SetupFormProps) {
         </div>
       </section>
 
-      {error ? <p className="setup-error">{error}</p> : null}
+      {error ? (
+        <div className="setup-error">
+          <p>{error}</p>
+          {error.includes("credits") ? (
+            <button type="button" onClick={() => router.push("/pricing")} className="setup-error-link">
+              Buy credits
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="start-row">
         <span className="summary">

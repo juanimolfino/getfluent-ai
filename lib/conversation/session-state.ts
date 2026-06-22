@@ -4,6 +4,7 @@ import {
   appendTurnToSession,
   completeConversationSession,
   createConversationSession,
+  createPaidConversationSession,
   getConversationSessionById,
   getConversationSession,
   getUserRecentSessions
@@ -26,6 +27,19 @@ export async function createSessionState(data: {
   targetTurns: number;
 }): Promise<ConversationSession> {
   return createConversationSession(data);
+}
+
+export async function createPaidSessionState(data: {
+  userId: string;
+  englishLevel: EnglishLevel;
+  topic: string;
+  targetTurns: number;
+}): Promise<ConversationSession> {
+  return createPaidConversationSession(data);
+}
+
+export function hasPaidConversationCredit(session: Pick<ConversationSession, "creditsUsed"> | null | undefined) {
+  return Boolean(session && session.creditsUsed >= 1);
 }
 
 export async function getRecentSessionStates(userId: string, limit = 10): Promise<ConversationSession[]> {

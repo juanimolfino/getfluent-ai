@@ -1,26 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
 import { getSessionState, incrementSttAudioMsUsed } from "@/lib/conversation/session-state";
+import { checkSttMetricsRateLimit } from "@/lib/redis/rate-limit";
 import { POST } from "@/app/api/stt/metrics/route";
 
 vi.mock("@/lib/auth/current-user", () => ({
   getCurrentUserProfile: vi.fn()
 }));
 
-vi.mock("@/lib/billing/tier", () => ({
-  isPremiumUser: vi.fn()
-}));
-
 vi.mock("@/lib/conversation/session-state", () => ({
   getSessionState: vi.fn(),
+  hasPaidConversationCredit: vi.fn((session: { creditsUsed?: number } | null | undefined) => Boolean(session && (session.creditsUsed ?? 0) >= 1)),
   incrementSttAudioMsUsed: vi.fn()
 }));
 
+vi.mock("@/lib/redis/rate-limit", () => ({
+  checkSttMetricsRateLimit: vi.fn(),
+  isRateLimitConfigurationError: vi.fn(() => false)
+}));
+
 const mockGetCurrentUserProfile = vi.mocked(getCurrentUserProfile);
-const mockIsPremiumUser = vi.mocked(isPremiumUser);
 const mockGetSessionState = vi.mocked(getSessionState);
 const mockIncrementSttAudioMsUsed = vi.mocked(incrementSttAudioMsUsed);
+const mockCheckSttMetricsRateLimit = vi.mocked(checkSttMetricsRateLimit);
 
 function metricRequest(body: unknown) {
   return new Request("http://localhost/api/stt/metrics", {
@@ -39,11 +41,12 @@ describe("POST /api/stt/metrics", () => {
     consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
+    mockCheckSttMetricsRateLimit.mockResolvedValue({ limited: false, configured: true });
     mockGetSessionState.mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
       userId: "user-1",
-      status: "active"
+      status: "active",
+      creditsUsed: 1
     } as Awaited<ReturnType<typeof getSessionState>>);
     mockIncrementSttAudioMsUsed.mockResolvedValue(3200);
   });
@@ -80,8 +83,13 @@ describe("POST /api/stt/metrics", () => {
     expect(mockGetCurrentUserProfile).not.toHaveBeenCalled();
   });
 
-  it("requires premium for Deepgram metrics", async () => {
-    mockIsPremiumUser.mockResolvedValue(false);
+  it("requires a paid conversation session for Deepgram metrics", async () => {
+    mockGetSessionState.mockResolvedValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      userId: "user-1",
+      status: "active",
+      creditsUsed: 0
+    } as Awaited<ReturnType<typeof getSessionState>>);
 
     const response = await POST(metricRequest({
       sessionId: "11111111-1111-4111-8111-111111111111",
@@ -90,7 +98,31 @@ describe("POST /api/stt/metrics", () => {
       audioMs: 1000
     }));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(402);
+    expect(mockIncrementSttAudioMsUsed).not.toHaveBeenCalled();
+  });
+
+  it("rate limits metric spam before session lookup", async () => {
+    mockCheckSttMetricsRateLimit.mockResolvedValue({
+      limited: true,
+      configured: true,
+      scope: "user",
+      count: 61,
+      max: 60,
+      windowSeconds: 60
+    });
+
+    const response = await POST(metricRequest({
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      event: "deepgram_end_of_turn",
+      provider: "deepgram_flux",
+      audioMs: 1000
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(body).toEqual({ error: "Too many metric requests" });
+    expect(mockGetSessionState).not.toHaveBeenCalled();
     expect(mockIncrementSttAudioMsUsed).not.toHaveBeenCalled();
   });
 

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
 import { CONVERSATION_MAX_TOKENS, CONVERSATION_MODEL, getAnthropic } from "@/lib/conversation/anthropic";
 import { getConversationFollowUpDelta } from "@/lib/conversation/assistant-response";
 import { buildConversationSystemPrompt } from "@/lib/conversation/conversation-prompt";
@@ -10,15 +9,19 @@ import { createElevenLabsStream, type ElevenLabsCharAlignment, type ElevenLabsSt
 import { getCachedAudio, getPhraseCacheVoiceId, isCachedPhrase } from "@/lib/conversation/phrase-cache";
 import {
   getSessionStateById,
+  hasPaidConversationCredit,
   incrementCharactersUsed,
   markSessionComplete,
   saveAssistantTurn,
   saveUserTurn
 } from "@/lib/conversation/session-state";
-import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
+import { getUserLanguageProfile, getUserMonthlyCharacterUsage } from "@/lib/db/fluent-queries";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
+import { enforceExpensiveEndpointRateLimit, enforceMonthlyUsageLimit } from "@/lib/http/rate-limit";
 import type { ConversationSession, ConversationTurn } from "@/lib/db/schema";
 
 const START_CONVERSATION_TEXT = "[START_CONVERSATION]";
+const DEFAULT_PREMIUM_MONTHLY_CHARACTER_LIMIT = 100000;
 
 const conversationStreamSchema = z.object({
   sessionId: z.string().uuid(),
@@ -104,6 +107,11 @@ function logPerfStep(step: string, startedAt: number, requestStartedAt: number, 
   console.log(`[perf] step=${step} ms=${ms}${details ? ` ${details}` : ""}`);
 }
 
+function getPremiumMonthlyCharacterLimit() {
+  const value = Number(process.env.PREMIUM_TTS_MONTHLY_CHARACTER_LIMIT ?? DEFAULT_PREMIUM_MONTHLY_CHARACTER_LIMIT);
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_PREMIUM_MONTHLY_CHARACTER_LIMIT;
+}
+
 function transformElevenLabsAlignment(alignment: ElevenLabsCharAlignment): PremiumTimingChar[] {
   return alignment.chars.map((char, index) => ({
     char,
@@ -127,29 +135,31 @@ export async function POST(request: Request) {
   const requestStartedAt = performance.now();
 
   try {
+    const originResponse = rejectForbiddenOrigin(request, "conversation_stream_premium");
+    if (originResponse) return originResponse;
+
     const authStartedAt = performance.now();
-    let authError: unknown = null;
-    const userPromise = getCurrentUserProfile()
+    const user = await getCurrentUserProfile()
       .then((user) => {
         logPerfStep("auth_get_db_user", authStartedAt, requestStartedAt, { hasUser: Boolean(user) });
         return user;
       })
       .catch((error) => {
-        authError = error;
         logPerfStep("auth_get_db_user", authStartedAt, requestStartedAt, { failed: true });
-        return null;
+        throw error;
       });
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const bodyParseStartedAt = performance.now();
     const body = await request.json();
     const parsed = conversationStreamSchema.safeParse(body);
     logPerfStep("body_parse_validate", bodyParseStartedAt, requestStartedAt, { valid: parsed.success });
     if (!parsed.success) {
-      const user = await userPromise;
-      if (authError) throw authError;
-      if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
+
+    const rateLimitPromise = enforceExpensiveEndpointRateLimit({ userId: user.id, kind: "conversation" });
+    const monthlyClaudeUsagePromise = enforceMonthlyUsageLimit({ userId: user.id, kind: "conversation" });
 
     const sessionLoadStartedAt = performance.now();
     let sessionLoadError: unknown = null;
@@ -170,21 +180,6 @@ export async function POST(request: Request) {
         return null;
       });
 
-    const user = await userPromise;
-    if (authError) throw authError;
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const premiumCheckStartedAt = performance.now();
-    const premiumUserPromise = isPremiumUser(user.id)
-      .then((premiumUser) => {
-        logPerfStep("premium_check", premiumCheckStartedAt, requestStartedAt, { userId: user.id });
-        return premiumUser;
-      })
-      .catch((error) => {
-        logPerfStep("premium_check", premiumCheckStartedAt, requestStartedAt, { userId: user.id, failed: true });
-        throw error;
-      });
-
     const languageProfileStartedAt = performance.now();
     const languageProfilePromise = getUserLanguageProfile(user.id)
       .then((languageProfile) => {
@@ -199,17 +194,42 @@ export async function POST(request: Request) {
         throw error;
       });
 
-    const [session, premiumUser, languageProfile] = await Promise.all([
+    const monthlyUsageStartedAt = performance.now();
+    const monthlyCharacterUsagePromise = getUserMonthlyCharacterUsage(user.id)
+      .then((usage) => {
+        logPerfStep("monthly_character_usage_load", monthlyUsageStartedAt, requestStartedAt, { userId: user.id });
+        return usage;
+      })
+      .catch((error) => {
+        logPerfStep("monthly_character_usage_load", monthlyUsageStartedAt, requestStartedAt, {
+          userId: user.id,
+          failed: true
+        });
+        throw error;
+      });
+
+    const [rateLimitResponse, monthlyClaudeUsageResponse, session, languageProfile, monthlyCharacterUsage] = await Promise.all([
+      rateLimitPromise,
+      monthlyClaudeUsagePromise,
       sessionPromise,
-      premiumUserPromise,
-      languageProfilePromise
+      languageProfilePromise,
+      monthlyCharacterUsagePromise
     ]);
+    if (rateLimitResponse) return rateLimitResponse;
+    if (monthlyClaudeUsageResponse) return monthlyClaudeUsageResponse;
     if (sessionLoadError) throw sessionLoadError;
-    if (!premiumUser) {
-      return NextResponse.json({ error: "Premium subscription required", fallback: "free" }, { status: 403 });
+    const monthlyCharacterLimit = getPremiumMonthlyCharacterLimit();
+    if (monthlyCharacterUsage >= monthlyCharacterLimit) {
+      console.warn(
+        `[usage-limit] premium monthly character limit reached userId=${user.id} used=${monthlyCharacterUsage} limit=${monthlyCharacterLimit}`
+      );
+      return NextResponse.json({ error: "Monthly usage limit reached" }, { status: 429 });
     }
     if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
     if (session.userId !== user.id) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return NextResponse.json({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
     if (session.status !== "active") {
       return NextResponse.json({ error: "Session is not active" }, { status: 400 });
     }

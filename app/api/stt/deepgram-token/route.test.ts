@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
 import { getSessionState } from "@/lib/conversation/session-state";
+import { getUserMonthlySttAudioMsUsage } from "@/lib/db/fluent-queries";
 import { checkSttTokenGrantRateLimit } from "@/lib/redis/rate-limit";
 import { GET, POST } from "@/app/api/stt/deepgram-token/route";
 
@@ -9,12 +9,13 @@ vi.mock("@/lib/auth/current-user", () => ({
   getCurrentUserProfile: vi.fn()
 }));
 
-vi.mock("@/lib/billing/tier", () => ({
-  isPremiumUser: vi.fn()
+vi.mock("@/lib/conversation/session-state", () => ({
+  getSessionState: vi.fn(),
+  hasPaidConversationCredit: vi.fn((session: { creditsUsed?: number } | null | undefined) => Boolean(session && (session.creditsUsed ?? 0) >= 1))
 }));
 
-vi.mock("@/lib/conversation/session-state", () => ({
-  getSessionState: vi.fn()
+vi.mock("@/lib/db/fluent-queries", () => ({
+  getUserMonthlySttAudioMsUsage: vi.fn()
 }));
 
 vi.mock("@/lib/redis/rate-limit", () => ({
@@ -22,14 +23,24 @@ vi.mock("@/lib/redis/rate-limit", () => ({
 }));
 
 const mockGetCurrentUserProfile = vi.mocked(getCurrentUserProfile);
-const mockIsPremiumUser = vi.mocked(isPremiumUser);
 const mockGetSessionState = vi.mocked(getSessionState);
+const mockGetUserMonthlySttAudioMsUsage = vi.mocked(getUserMonthlySttAudioMsUsage);
 const mockCheckSttTokenGrantRateLimit = vi.mocked(checkSttTokenGrantRateLimit);
 
 function mockDeepgramResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" }
+  });
+}
+
+const sessionId = "11111111-1111-4111-8111-111111111111";
+
+function tokenRequest(body: unknown = { sessionId }) {
+  return new Request("http://localhost:3000/api/stt/deepgram-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify(body)
   });
 }
 
@@ -44,6 +55,8 @@ describe("POST /api/stt/deepgram-token", () => {
     process.env.DEEPGRAM_FLUX_MODEL = "flux-general-en";
     delete process.env.DEEPGRAM_FLUX_EOT_THRESHOLD;
     delete process.env.DEEPGRAM_FLUX_EOT_TIMEOUT_MS;
+    delete process.env.PREMIUM_STT_MONTHLY_AUDIO_MS_LIMIT;
+    mockGetUserMonthlySttAudioMsUsage.mockResolvedValue(0);
     mockCheckSttTokenGrantRateLimit.mockResolvedValue({ limited: false, configured: true });
   });
 
@@ -61,7 +74,7 @@ describe("POST /api/stt/deepgram-token", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(body).toEqual({ error: "Unauthorized" });
-    expect(mockIsPremiumUser).not.toHaveBeenCalled();
+    expect(mockGetSessionState).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -85,43 +98,50 @@ describe("POST /api/stt/deepgram-token", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("returns 403 when the user is not premium", async () => {
+  it("requires a sessionId in the request body", async () => {
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(false);
 
-    const response = await POST();
+    const response = await POST(tokenRequest({}));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(400);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mockGetSessionState).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("validates the session when sessionId is provided", async () => {
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
     mockGetSessionState.mockResolvedValue({
-      id: "11111111-1111-4111-8111-111111111111",
-      status: "active"
+      id: sessionId,
+      status: "active",
+      creditsUsed: 1
     } as Awaited<ReturnType<typeof getSessionState>>);
     vi.mocked(fetch).mockResolvedValue(mockDeepgramResponse({ access_token: "temporary-token", expires_in: 30 }));
 
-    const response = await POST(new Request("http://localhost:3000/api/stt/deepgram-token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
-      body: JSON.stringify({ sessionId: "11111111-1111-4111-8111-111111111111" })
-    }));
+    const response = await POST(tokenRequest());
 
     expect(response.status).toBe(200);
-    expect(mockGetSessionState).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111", "user-1");
+    expect(mockGetSessionState).toHaveBeenCalledWith(sessionId, "user-1");
     expect(mockCheckSttTokenGrantRateLimit).toHaveBeenCalledWith({
       userId: "user-1",
-      sessionId: "11111111-1111-4111-8111-111111111111"
+      sessionId
     });
+  });
+
+  it("rejects token grants when the session has no paid credit", async () => {
+    mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 0 } as Awaited<ReturnType<typeof getSessionState>>);
+
+    const response = await POST(tokenRequest());
+
+    expect(response.status).toBe(402);
+    expect(mockCheckSttTokenGrantRateLimit).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rate limits token grants before calling Deepgram", async () => {
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 1 } as Awaited<ReturnType<typeof getSessionState>>);
     mockCheckSttTokenGrantRateLimit.mockResolvedValue({
       limited: true,
       configured: true,
@@ -131,7 +151,7 @@ describe("POST /api/stt/deepgram-token", () => {
       windowSeconds: 60
     });
 
-    const response = await POST();
+    const response = await POST(tokenRequest());
     const body = await response.json();
 
     expect(response.status).toBe(429);
@@ -139,12 +159,27 @@ describe("POST /api/stt/deepgram-token", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("rejects token grants after the monthly STT audio limit is reached", async () => {
+    process.env.PREMIUM_STT_MONTHLY_AUDIO_MS_LIMIT = "1000";
+    mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 1 } as Awaited<ReturnType<typeof getSessionState>>);
+    mockGetUserMonthlySttAudioMsUsage.mockResolvedValue(1000);
+
+    const response = await POST(tokenRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(body).toEqual({ error: "Monthly usage limit reached" });
+    expect(mockCheckSttTokenGrantRateLimit).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("returns 503 when Deepgram is not configured", async () => {
     delete process.env.DEEPGRAM_API_KEY;
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 1 } as Awaited<ReturnType<typeof getSessionState>>);
 
-    const response = await POST();
+    const response = await POST(tokenRequest());
     const body = await response.json();
 
     expect(response.status).toBe(503);
@@ -154,22 +189,22 @@ describe("POST /api/stt/deepgram-token", () => {
 
   it("returns 502 when Deepgram rejects the token grant", async () => {
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 1 } as Awaited<ReturnType<typeof getSessionState>>);
     vi.mocked(fetch).mockResolvedValue(mockDeepgramResponse({ error: "bad key" }, 401));
 
-    const response = await POST();
+    const response = await POST(tokenRequest());
     const body = await response.json();
 
     expect(response.status).toBe(502);
     expect(body).toEqual({ error: "Could not create Deepgram token" });
   });
 
-  it("returns a safe temporary token response for premium users", async () => {
+  it("returns a safe temporary token response for paid conversation sessions", async () => {
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 1 } as Awaited<ReturnType<typeof getSessionState>>);
     vi.mocked(fetch).mockResolvedValue(mockDeepgramResponse({ access_token: "temporary-token", expires_in: 30 }));
 
-    const response = await POST();
+    const response = await POST(tokenRequest());
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -198,10 +233,10 @@ describe("POST /api/stt/deepgram-token", () => {
 
   it("returns 502 when Deepgram returns a malformed grant response", async () => {
     mockGetCurrentUserProfile.mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof getCurrentUserProfile>>);
-    mockIsPremiumUser.mockResolvedValue(true);
+    mockGetSessionState.mockResolvedValue({ id: sessionId, status: "active", creditsUsed: 1 } as Awaited<ReturnType<typeof getSessionState>>);
     vi.mocked(fetch).mockResolvedValue(mockDeepgramResponse({ access_token: "temporary-token" }));
 
-    const response = await POST();
+    const response = await POST(tokenRequest());
 
     expect(response.status).toBe(502);
   });

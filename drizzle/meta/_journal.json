@@ -50,6 +50,20 @@
       "when": 1780687717539,
       "tag": "0006_grey_kree",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780953900000,
+      "tag": "0007_target_turns_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781037600000,
+      "tag": "0008_split_credit_balances",
+      "breakpoints": true
     }
   ]
 }

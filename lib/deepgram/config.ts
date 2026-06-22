@@ -1,4 +1,5 @@
 const DEFAULT_TEMP_TOKEN_TTL_SECONDS = 30;
+const MAX_TEMP_TOKEN_TTL_SECONDS = 60;
 const DEFAULT_FLUX_MODEL = "flux-general-en";
 const DEFAULT_EOT_THRESHOLD = 0.9;
 const DEFAULT_EOT_TIMEOUT_MS = 10000;
@@ -65,13 +66,13 @@ export function getDeepgramServerConfig(env: Partial<Record<string, string | und
     throw new DeepgramConfigError("missing_api_key", "DEEPGRAM_API_KEY is required");
   }
 
-  const ttlSeconds = parseNumberInRange({
-    name: "DEEPGRAM_TEMP_TOKEN_TTL_SECONDS",
-    value: env.DEEPGRAM_TEMP_TOKEN_TTL_SECONDS,
-    defaultValue: DEFAULT_TEMP_TOKEN_TTL_SECONDS,
-    min: 1,
-    max: 3600
-  });
+	  const ttlSeconds = parseNumberInRange({
+	    name: "DEEPGRAM_TEMP_TOKEN_TTL_SECONDS",
+	    value: env.DEEPGRAM_TEMP_TOKEN_TTL_SECONDS,
+	    defaultValue: DEFAULT_TEMP_TOKEN_TTL_SECONDS,
+	    min: 1,
+	    max: MAX_TEMP_TOKEN_TTL_SECONDS
+	  });
   const eotThreshold = parseNumberInRange({
     name: "DEEPGRAM_FLUX_EOT_THRESHOLD",
     value: env.DEEPGRAM_FLUX_EOT_THRESHOLD,

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
 import { createElevenLabsStream, type ElevenLabsCharAlignment, type ElevenLabsStream } from "@/lib/conversation/elevenlabs-stream";
-import { getSessionState, markSessionComplete, saveAssistantTurn } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit, markSessionComplete, saveAssistantTurn } from "@/lib/conversation/session-state";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 import type { ConversationTurn } from "@/lib/db/schema";
 
 const endConversationSchema = z.object({
@@ -81,6 +81,9 @@ async function synthesizePremiumGoodbyeAudio(text: string): Promise<PremiumGoodb
 
 export async function POST(request: Request) {
   try {
+    const originResponse = rejectForbiddenOrigin(request, "conversation_end");
+    if (originResponse) return originResponse;
+
     const user = await getCurrentUserProfile();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -89,10 +92,12 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
-    const shouldIncludePremiumAudio = Boolean(parsed.data.includePremiumAudio) && (await isPremiumUser(user.id));
-
     const session = await getSessionState(parsed.data.sessionId, user.id);
     if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return NextResponse.json({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
+    const shouldIncludePremiumAudio = Boolean(parsed.data.includePremiumAudio);
 
     if (session.status !== "active") {
       return NextResponse.json({

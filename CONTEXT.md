@@ -135,22 +135,39 @@ From `.env.example`:
 - `STRIPE_SECRET_KEY`: Stripe server secret key used by checkout, portal, and webhook handlers.
 - `STRIPE_WEBHOOK_SECRET`: Stripe webhook signing secret for `app/api/stripe/webhook/route.ts`.
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`: Stripe publishable key. Present for frontend usage; current checkout implementation is server-side and does not yet use embedded Stripe Elements.
-- `STRIPE_PRICE_ID_CREDITS_10`: Stripe Price ID for the 10-credit one-time product.
-- `STRIPE_PRICE_ID_CREDITS_50`: Stripe Price ID for the 50-credit one-time product.
+- `STRIPE_PRICE_ID_STARTER_MONTHLY`: Stripe Price ID for the recurring Starter monthly plan.
+- `STRIPE_PRICE_ID_PLUS_MONTHLY`: Stripe Price ID for the recurring Plus monthly plan.
 - `STRIPE_PRICE_ID_PRO_MONTHLY`: Stripe Price ID for the recurring Pro monthly plan.
+- `STRIPE_PRICE_ID_PACK_MINI`: Stripe Price ID for the Mini one-time credit pack.
+- `STRIPE_PRICE_ID_PACK_MEDIO`: Stripe Price ID for the Medio one-time credit pack.
+- `STRIPE_PRICE_ID_PACK_BIG`: Stripe Price ID for the Grande one-time credit pack.
 - `FAL_KEY`: fal.ai API key for image generation.
 - `OPENAI_API_KEY`: OpenAI API key for TTS generation.
-- `UPSTASH_REDIS_REST_URL`: Upstash Redis REST URL. Values are normalized to tolerate accidental wrapping quotes.
-- `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST token. Values are normalized to tolerate accidental wrapping quotes.
+- `UPSTASH_REDIS_REST_URL`: Upstash Redis REST URL. Values are normalized to tolerate accidental wrapping quotes. Required in production for job concurrency and API abuse rate limits.
+- `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST token. Values are normalized to tolerate accidental wrapping quotes. Required in production for job concurrency and API abuse rate limits.
 - `RESEND_API_KEY`: Resend API key. Optional operationally; email failures are non-blocking.
 - `RESEND_FROM_EMAIL`: sender email for Resend. Must be a verified domain sender in Resend; Gmail addresses are rejected.
 - `NEXT_PUBLIC_APP_URL`: canonical public app URL, used by metadata, Stripe success/cancel URLs, sitemap, and robots.
 - `HEALTHCHECK_SECRET`: bearer token required by `/api/health` in production.
 - `FREE_SIGNUP_CREDITS`: credits granted when a user profile is created for the first time.
-- `FREE_MONTHLY_CREDITS`: displayed/used as Free plan monthly credit metadata.
-- `PRO_MONTHLY_CREDITS`: credits granted on `invoice.paid` for a Pro subscription.
 - `MAX_CONCURRENT_JOBS`: per-user active job concurrency limit enforced through Upstash Redis.
 - `SUPABASE_STORAGE_BUCKET`: Supabase Storage bucket for generated files; currently `ai-results`. The bucket should be private.
+
+### Fluent API rate limits
+
+Defaults live in `lib/redis/rate-limit.ts`. These env vars are optional overrides; if omitted, the defaults apply. In production, Upstash Redis must be configured or protected expensive endpoints return `503`.
+
+- `CONVERSATION_TURNS_PER_USER_PER_WINDOW`: default `5`.
+- `CONVERSATION_RATE_LIMIT_WINDOW_SECONDS`: default `60`.
+- `CONVERSATION_ANALYSES_PER_USER_PER_WINDOW`: default `4`.
+- `CONVERSATION_ANALYSIS_RATE_LIMIT_WINDOW_SECONDS`: default `60`.
+- `EXERCISE_GENERATIONS_PER_USER_PER_WINDOW`: default `4`.
+- `EXERCISE_GENERATION_RATE_LIMIT_WINDOW_SECONDS`: default `60`.
+- `EXERCISE_SPEECH_CHECKS_PER_USER_PER_WINDOW`: default `20`.
+- `EXERCISE_SPEECH_CHECK_RATE_LIMIT_WINDOW_SECONDS`: default `60`.
+- `EXERCISE_TTS_REQUESTS_PER_USER_PER_WINDOW`: default `10`.
+- `EXERCISE_TTS_RATE_LIMIT_WINDOW_SECONDS`: default `60`.
+- `PREMIUM_TTS_MONTHLY_CHARACTER_LIMIT`: default `100000`.
 
 ## 5. Modelo de datos
 
@@ -272,7 +289,7 @@ RLS:
   - `addCredits()` inserts the transaction first and only increments balance if the transaction is new.
 
 - Subscription credits:
-  - `invoice.paid` webhooks retrieve the subscription and add `PRO_MONTHLY_CREDITS`.
+  - `invoice.paid` webhooks retrieve the subscription, read Stripe Price metadata, and reset subscription credits to that metadata value.
   - Subscription rows are inserted or updated with Stripe period/status data.
 
 - Rate/concurrency:
@@ -410,7 +427,7 @@ Known placeholders or pending pieces:
 
 4. Improve pricing model.
    - Decide final products/prices.
-   - Add `STRIPE_PRICE_ID_CREDITS_100` if a 100-credit pack returns.
+   - Add a new `STRIPE_PRICE_ID_*` env var and matching `lib/stripe/pricing.ts` entry if another pack returns.
    - Keep UI prices in `lib/stripe/pricing.ts` synchronized with Stripe.
 
 6. Improve job UX.

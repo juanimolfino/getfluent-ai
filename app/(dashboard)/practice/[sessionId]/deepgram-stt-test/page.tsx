@@ -4,8 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { DeepgramSttTest } from "@/components/fluent/deepgram-stt-test";
 import { Button } from "@/components/ui/button";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 
 export const metadata = { title: "Deepgram STT test" };
 
@@ -20,8 +19,7 @@ export default async function DeepgramSttTestPage({ params }: DeepgramSttTestPag
   const { sessionId } = await params;
   const session = await getSessionState(sessionId, user.id);
   if (!session) notFound();
-
-  const isPremium = await isPremiumUser(user.id);
+  if (!hasPaidConversationCredit(session)) notFound();
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">
@@ -32,14 +30,7 @@ export default async function DeepgramSttTestPage({ params }: DeepgramSttTestPag
         </Link>
       </Button>
 
-      {isPremium ? (
-        <DeepgramSttTest sessionId={session.id} />
-      ) : (
-        <section className="rounded-lg border bg-white p-5">
-          <h1 className="text-2xl font-semibold">Deepgram STT test</h1>
-          <p className="mt-2 text-sm text-muted-foreground">This diagnostic is only available for Pro users.</p>
-        </section>
-      )}
+      <DeepgramSttTest sessionId={session.id} />
     </main>
   );
 }

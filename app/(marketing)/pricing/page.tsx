@@ -1,8 +1,16 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { CREDIT_PACKS, PLANS } from "@/lib/stripe/pricing";
+import {
+  CREDIT_PACKS,
+  SUBSCRIPTION_PRODUCTS,
+  formatStripeUnitAmount,
+  getConfiguredStripePriceMetadata,
+  type PricingProductConfig,
+  type StripePriceCreditMetadata
+} from "@/lib/stripe/pricing";
 
 export const metadata = { title: "Pricing" };
+export const dynamic = "force-dynamic";
 
 type PricingCardProps = {
   variant?: "default" | "feature" | "pack";
@@ -113,21 +121,24 @@ function PricingCard({
 }
 
 function CheckoutButton({
-  mode,
-  packId,
-  className,
-  label
-}: {
-  mode: "subscription" | "credits";
-  packId?: string;
-  className: string;
-  label: string;
-}) {
+	  mode,
+	  planId,
+	  packId,
+	  className,
+	  label
+	}: {
+	  mode: "subscription" | "credits";
+	  planId?: string;
+	  packId?: string;
+	  className: string;
+	  label: string;
+	}) {
   return (
-    <form action="/api/stripe/checkout" method="post" className="pc-cta">
-      <input type="hidden" name="mode" value={mode} />
-      {packId ? <input type="hidden" name="packId" value={packId} /> : null}
-      <button type="submit" className={className}>
+	    <form action="/api/stripe/checkout" method="post" className="pc-cta">
+	      <input type="hidden" name="mode" value={mode} />
+	      {planId ? <input type="hidden" name="planId" value={planId} /> : null}
+	      {packId ? <input type="hidden" name="packId" value={packId} /> : null}
+	      <button type="submit" className={className}>
         <CardIcon />
         {label}
       </button>
@@ -135,23 +146,37 @@ function CheckoutButton({
   );
 }
 
-function planDescription(planId: string) {
-  if (planId === "pro") return "Natural voice, translations, and analysis - the full GetFluent experience.";
-  return "Everything you need to try real spoken practice with Alex.";
-}
-
 function displayPackName(name: string) {
-  return name.replace(/\s+Pack$/, "");
+  return name.replace(/^Pack\s+/, "");
 }
 
-function packDescription(credits: number) {
-  if (credits >= 200) return "200 practice credits - best value per credit.";
-  return `${credits} practice credits that never expire.`;
+async function loadStripeDisplayProduct(config: PricingProductConfig) {
+  try {
+    return { config, metadata: await getConfiguredStripePriceMetadata(config), error: null };
+  } catch (error) {
+    return {
+      config,
+      metadata: null,
+      error: error instanceof Error ? error.message : "Stripe price metadata unavailable"
+    };
+  }
 }
 
-export default function PricingPage() {
-  const freePlan = PLANS.find((plan) => plan.id === "free") ?? PLANS[0];
-  const proPlan = PLANS.find((plan) => plan.id === "pro") ?? PLANS[1];
+function displayPrice(metadata: StripePriceCreditMetadata | null) {
+  if (!metadata) return "TBD";
+  return formatStripeUnitAmount(metadata.unitAmount, metadata.currency);
+}
+
+function displayCredits(metadata: StripePriceCreditMetadata | null) {
+  if (!metadata) return "Stripe metadata pending";
+  return `${metadata.credits} credits`;
+}
+
+export default async function PricingPage() {
+  const [subscriptionProducts, packProducts] = await Promise.all([
+    Promise.all(SUBSCRIPTION_PRODUCTS.map(loadStripeDisplayProduct)),
+    Promise.all(CREDIT_PACKS.map(loadStripeDisplayProduct))
+  ]);
 
   return (
     <div className="gf-page gf-pricing">
@@ -183,31 +208,42 @@ export default function PricingPage() {
             </p>
           </div>
 
-          <div className="plans">
-            <PricingCard
-              name={freePlan.name}
-              price={`$${freePlan.priceMonthly}`}
-              cadence="/mo"
-              description={planDescription(freePlan.id)}
-              features={freePlan.features}
-              cta={
-                <button type="button" className="btn btn-ghost pc-cta" disabled>
+	          <div className="plans">
+	            <PricingCard
+	              name="Free"
+	              price="$0"
+	              cadence="/mo"
+	              description="Try GetFluent with free credits."
+	              features={["5 free credits once", "Full voice practice", "Conversation analysis"]}
+	              cta={
+	                <button type="button" className="btn btn-ghost pc-cta" disabled>
                   Current plan
                 </button>
-              }
-            />
+	              }
+	            />
 
-            <PricingCard
-              variant="feature"
-              name={proPlan.name}
-              tag="Most popular"
-              price={`$${proPlan.priceMonthly}`}
-              cadence="/mo"
-              description={planDescription(proPlan.id)}
-              features={proPlan.features}
-              cta={<CheckoutButton mode="subscription" className="btn btn-white pc-cta" label="Upgrade to Pro" />}
-            />
-          </div>
+	            {subscriptionProducts.map(({ config, metadata }) => (
+	              <PricingCard
+	                key={config.id}
+	                variant={config.recommended ? "feature" : "default"}
+	                name={config.name}
+	                tag={config.recommended ? "Recommended" : undefined}
+	                credits={displayCredits(metadata)}
+	                price={displayPrice(metadata)}
+	                cadence="/mo"
+	                description={config.description}
+	                features={config.features}
+	                cta={
+	                  <CheckoutButton
+	                    mode="subscription"
+	                    planId={config.id}
+	                    className={config.recommended ? "btn btn-white pc-cta" : "btn btn-ghost pc-cta"}
+	                    label="Choose plan"
+	                  />
+	                }
+	              />
+	            ))}
+	          </div>
 
           <div className="packs-head">
             <h2 className="serif">
@@ -216,21 +252,21 @@ export default function PricingPage() {
             <p>One-time packs that never expire. Perfect if you practice in bursts.</p>
           </div>
 
-          <div className="packs">
-            {CREDIT_PACKS.map((pack) => (
-              <PricingCard
-                key={pack.id}
-                variant="pack"
-                name={displayPackName(pack.name)}
-                credits={`${pack.credits} credits`}
-                price={`$${pack.price}`}
-                description={packDescription(pack.credits)}
-                cta={
-                  <CheckoutButton
-                    mode="credits"
-                    packId={pack.id}
-                    className="btn btn-ghost pc-cta"
-                    label="Buy pack"
+	          <div className="packs">
+	            {packProducts.map(({ config, metadata }) => (
+	              <PricingCard
+	                key={config.id}
+	                variant="pack"
+	                name={displayPackName(config.name)}
+	                credits={displayCredits(metadata)}
+	                price={displayPrice(metadata)}
+	                description={config.description}
+	                cta={
+	                  <CheckoutButton
+	                    mode="credits"
+	                    packId={config.id}
+	                    className="btn btn-ghost pc-cta"
+	                    label="Buy pack"
                   />
                 }
               />

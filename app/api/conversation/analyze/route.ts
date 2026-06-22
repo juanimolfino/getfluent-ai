@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 import { conversationAnalysisPayloadSchema } from "@/lib/exercises/analysis";
 import { buildAnalysisPrompt } from "@/lib/exercises/analysis-prompt";
 import { parseJsonObject } from "@/lib/exercises/json";
@@ -12,6 +12,8 @@ import {
   getUserLanguageProfile,
   markConversationSessionAnalyzed
 } from "@/lib/db/fluent-queries";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
+import { enforceExpensiveEndpointRateLimit, enforceMonthlyUsageLimit } from "@/lib/http/rate-limit";
 
 const analyzeSchema = z.object({
   sessionId: z.string().uuid()
@@ -23,8 +25,14 @@ function buildTranscriptFromTurns(turns: { role: "assistant" | "user"; content: 
 
 export async function POST(request: Request) {
   try {
+    const originResponse = rejectForbiddenOrigin(request, "conversation_analyze");
+    if (originResponse) return originResponse;
+
     const user = await getCurrentUserProfile();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const rateLimitResponse = await enforceExpensiveEndpointRateLimit({ userId: user.id, kind: "analysis" });
+    if (rateLimitResponse) return rateLimitResponse;
 
     const body = await request.json();
     const parsed = analyzeSchema.safeParse(body);
@@ -32,11 +40,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
+    const session = await getSessionState(parsed.data.sessionId, user.id);
+    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return NextResponse.json({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
+
     const cached = await getConversationAnalysisBySession(parsed.data.sessionId, user.id);
     if (cached) return NextResponse.json({ analysis: cached });
 
-    const session = await getSessionState(parsed.data.sessionId, user.id);
-    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
     if (session.status !== "completed" && session.status !== "analyzed") {
       return NextResponse.json({ error: "Conversation must be completed before analysis" }, { status: 400 });
     }
@@ -44,6 +56,9 @@ export async function POST(request: Request) {
     const languageProfile = await getUserLanguageProfile(user.id);
     const transcript = session.transcript || buildTranscriptFromTurns(session.turns);
     if (!transcript.trim()) return NextResponse.json({ error: "Conversation transcript is empty" }, { status: 400 });
+
+    const monthlyUsageResponse = await enforceMonthlyUsageLimit({ userId: user.id, kind: "analysis" });
+    if (monthlyUsageResponse) return monthlyUsageResponse;
 
     const prompt = buildAnalysisPrompt({
       transcript,

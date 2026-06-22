@@ -25,6 +25,7 @@ type TheoryTranslation = {
 };
 
 const exerciseSetCache = new Map<string, ExerciseSet>();
+const exerciseSetRequestCache = new Map<string, Promise<ExerciseSet>>();
 const audioUrlCache = new Map<string, string>();
 const translationCache = new Map<string, TheoryTranslation>();
 
@@ -69,16 +70,25 @@ export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExe
       setError(null);
 
       try {
-        const response = await fetch("/api/exercises/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ analysisId, weakPointId })
-        });
-        if (!response.ok) throw new Error("Could not generate the practice set.");
+        let request = exerciseSetRequestCache.get(cacheKey);
+        if (!request) {
+          request = fetch("/api/exercises/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ analysisId, weakPointId })
+          }).then(async (response) => {
+            if (!response.ok) throw new Error("Could not generate the practice set.");
+            const data = (await response.json()) as GenerateResponse;
+            exerciseSetCache.set(cacheKey, data.exerciseSet);
+            return data.exerciseSet;
+          }).finally(() => {
+            exerciseSetRequestCache.delete(cacheKey);
+          });
+          exerciseSetRequestCache.set(cacheKey, request);
+        }
 
-        const data = (await response.json()) as GenerateResponse;
-        exerciseSetCache.set(cacheKey, data.exerciseSet);
-        if (!cancelled) setExerciseSet(data.exerciseSet);
+        const nextExerciseSet = await request;
+        if (!cancelled) setExerciseSet(nextExerciseSet);
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Something went wrong.");
       } finally {
@@ -135,7 +145,7 @@ export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExe
       const response = await fetch("/api/exercises/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ analysisId, weakPointId, text })
       });
 
       if (response.ok) {

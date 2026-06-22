@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import { ensureUserProfile } from "@/lib/db/queries";
-import { getCreditPack } from "@/lib/stripe/pricing";
+import {
+  getConfiguredStripePriceMetadata,
+  getCreditPack,
+  getPriceIdFromEnv,
+  getSubscriptionProduct
+} from "@/lib/stripe/pricing";
 import { getStripe } from "@/lib/stripe/client";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
+  const originResponse = rejectForbiddenOrigin(request, "stripe_checkout");
+  if (originResponse) return originResponse;
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user }
@@ -18,24 +27,34 @@ export async function POST(request: Request) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
 
   if (mode === "subscription") {
-    const price = process.env.STRIPE_PRICE_ID_PRO_MONTHLY;
-    if (!price) throw new Error("STRIPE_PRICE_ID_PRO_MONTHLY is required");
+    const product = getSubscriptionProduct(String(form.get("planId") ?? "plus"));
+    if (!product) return NextResponse.json({ error: "Invalid subscription plan" }, { status: 400 });
+    const price = getPriceIdFromEnv(product.stripePriceEnv);
+    const priceMetadata = await getConfiguredStripePriceMetadata(product);
+    if (priceMetadata.type !== "subscription") {
+      return NextResponse.json({ error: "Invalid Stripe price metadata" }, { status: 400 });
+    }
+
     const session = await getStripe().checkout.sessions.create({
       mode: "subscription",
       customer_email: profile.email,
       line_items: [{ price, quantity: 1 }],
       success_url: `${appUrl}/dashboard?checkout=success`,
       cancel_url: `${appUrl}/pricing`,
-      metadata: { userId: profile.id, kind: "subscription", plan: "pro" },
-      subscription_data: { metadata: { userId: profile.id, plan: "pro" } }
+      client_reference_id: profile.id,
+      metadata: { userId: profile.id, kind: "subscription", plan: product.id, priceId: price },
+      subscription_data: { metadata: { userId: profile.id, plan: product.id, priceId: price } }
     });
     return NextResponse.redirect(session.url!, 303);
   }
 
-  const pack = getCreditPack(String(form.get("packId") ?? "credits_10"));
+  const pack = getCreditPack(String(form.get("packId") ?? "pack_mini"));
   if (!pack) return NextResponse.json({ error: "Invalid credit pack" }, { status: 400 });
-  const price = process.env[pack.stripePriceEnv];
-  if (!price) throw new Error(`${pack.stripePriceEnv} is required`);
+  const price = getPriceIdFromEnv(pack.stripePriceEnv);
+  const priceMetadata = await getConfiguredStripePriceMetadata(pack);
+  if (priceMetadata.type !== "pack") {
+    return NextResponse.json({ error: "Invalid Stripe price metadata" }, { status: 400 });
+  }
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
@@ -43,7 +62,8 @@ export async function POST(request: Request) {
     line_items: [{ price, quantity: 1 }],
     success_url: `${appUrl}/dashboard?checkout=success`,
     cancel_url: `${appUrl}/pricing`,
-    metadata: { userId: profile.id, kind: "credits", credits: String(pack.credits) }
+    client_reference_id: profile.id,
+    metadata: { userId: profile.id, kind: "pack", packId: pack.id, priceId: price }
   });
 
   return NextResponse.redirect(session.url!, 303);

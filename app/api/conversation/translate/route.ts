@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MODEL, getAnthropic, extractTextFromMessage } from "@/lib/conversation/anthropic";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 import { getUserLanguageProfile } from "@/lib/db/fluent-queries";
+import { enforceExpensiveEndpointRateLimit, enforceMonthlyUsageLimit } from "@/lib/http/rate-limit";
 import type { NativeLanguage } from "@/lib/db/schema";
 
 const translateSchema = z.object({
@@ -31,15 +32,24 @@ export async function POST(request: Request) {
     const user = await getCurrentUserProfile();
     if (!user) return jsonNoStore({ error: "Unauthorized" }, { status: 401 });
 
+    const rateLimitResponse = await enforceExpensiveEndpointRateLimit({ userId: user.id, kind: "translation" });
+    if (rateLimitResponse) return rateLimitResponse;
+
     const body = await request.json();
     const parsed = translateSchema.safeParse(body);
     if (!parsed.success) return jsonNoStore({ error: parsed.error.flatten() }, { status: 400 });
 
     const session = await getSessionState(parsed.data.sessionId, user.id);
     if (!session) return jsonNoStore({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return jsonNoStore({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
 
     const assistantTurnExists = session.turns.some((turn) => turn.role === "assistant" && turn.content === parsed.data.text);
     if (!assistantTurnExists) return jsonNoStore({ error: "Only Alex messages can be translated" }, { status: 400 });
+
+    const monthlyUsageResponse = await enforceMonthlyUsageLimit({ userId: user.id, kind: "translation" });
+    if (monthlyUsageResponse) return monthlyUsageResponse;
 
     const languageProfile = await getUserLanguageProfile(user.id);
     const targetLanguage = LANGUAGE_LABELS[languageProfile?.nativeLanguage ?? "spanish"];

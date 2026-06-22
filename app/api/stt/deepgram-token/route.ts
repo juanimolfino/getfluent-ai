@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
-import { isPremiumUser } from "@/lib/billing/tier";
-import { getSessionState } from "@/lib/conversation/session-state";
+import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
+import { getUserMonthlySttAudioMsUsage } from "@/lib/db/fluent-queries";
 import {
   DEEPGRAM_FLUX_PROVIDER,
   DEEPGRAM_TOKEN_GRANT_URL,
@@ -23,8 +23,10 @@ type DeepgramErrorMetadata = {
 };
 
 const deepgramTokenRequestSchema = z.object({
-  sessionId: z.string().uuid().optional()
+  sessionId: z.string().uuid()
 });
+
+const DEFAULT_PREMIUM_STT_MONTHLY_AUDIO_MS_LIMIT = 18_000_000;
 
 function jsonNoStore(payload: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers);
@@ -34,6 +36,11 @@ function jsonNoStore(payload: unknown, init?: ResponseInit) {
 
 function safeErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "unknown";
+}
+
+function getPremiumSttMonthlyAudioMsLimit() {
+  const value = Number(process.env.PREMIUM_STT_MONTHLY_AUDIO_MS_LIMIT ?? DEFAULT_PREMIUM_STT_MONTHLY_AUDIO_MS_LIMIT);
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_PREMIUM_STT_MONTHLY_AUDIO_MS_LIMIT;
 }
 
 async function readDeepgramErrorMetadata(response: Response): Promise<DeepgramErrorMetadata> {
@@ -48,11 +55,11 @@ async function readDeepgramErrorMetadata(response: Response): Promise<DeepgramEr
   }
 }
 
-async function parseOptionalTokenRequestBody(request: Request | undefined) {
-  if (!request) return {};
+async function parseTokenRequestBody(request: Request | undefined) {
+  if (!request) return null;
   try {
     const text = await request.text();
-    if (!text.trim()) return {};
+    if (!text.trim()) return null;
     const parsed = deepgramTokenRequestSchema.safeParse(JSON.parse(text));
     if (!parsed.success) return null;
     return parsed.data;
@@ -75,16 +82,23 @@ export async function POST(request?: Request) {
     const user = await getCurrentUserProfile();
     if (!user) return jsonNoStore({ error: "Unauthorized" }, { status: 401 });
 
-    const parsedBody = await parseOptionalTokenRequestBody(request);
+    const parsedBody = await parseTokenRequestBody(request);
     if (!parsedBody) return jsonNoStore({ error: "Invalid request" }, { status: 400 });
 
-    const premiumUser = await isPremiumUser(user.id);
-    if (!premiumUser) return jsonNoStore({ error: "Premium subscription required" }, { status: 403 });
+    const session = await getSessionState(parsedBody.sessionId, user.id);
+    if (!session) return jsonNoStore({ error: "Session not found" }, { status: 404 });
+    if (!hasPaidConversationCredit(session)) {
+      return jsonNoStore({ error: "No paid conversation credit found for this session" }, { status: 402 });
+    }
+    if (session.status !== "active") return jsonNoStore({ error: "Session is not active" }, { status: 400 });
 
-    if (parsedBody.sessionId) {
-      const session = await getSessionState(parsedBody.sessionId, user.id);
-      if (!session) return jsonNoStore({ error: "Session not found" }, { status: 404 });
-      if (session.status !== "active") return jsonNoStore({ error: "Session is not active" }, { status: 400 });
+    const monthlySttAudioMsUsage = await getUserMonthlySttAudioMsUsage(user.id);
+    const monthlySttAudioMsLimit = getPremiumSttMonthlyAudioMsLimit();
+    if (monthlySttAudioMsUsage >= monthlySttAudioMsLimit) {
+      console.warn(
+        `[usage-limit] deepgram monthly audio limit reached userId=${user.id} used=${monthlySttAudioMsUsage} limit=${monthlySttAudioMsLimit}`
+      );
+      return jsonNoStore({ error: "Monthly usage limit reached" }, { status: 429 });
     }
 
     const rateLimit = await checkSttTokenGrantRateLimit({
