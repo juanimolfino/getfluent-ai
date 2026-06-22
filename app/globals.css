@@ -894,6 +894,14 @@ body {
   align-items: center;
   justify-content: space-between;
 }
+.gf-page.gf-pricing .pricing-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.gf-page.gf-pricing .pricing-actions form {
+  margin: 0;
+}
 .gf-page.gf-pricing .page {
   padding: 64px 0 90px;
 }
@@ -1087,6 +1095,21 @@ body {
   font-size: 14px;
 }
 @media (max-width: 760px) {
+  .gf-page.gf-pricing .topbar-in {
+    height: auto;
+    min-height: 66px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding-block: 14px;
+  }
+  .gf-page.gf-pricing .pricing-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .gf-page.gf-pricing .pricing-actions .btn {
+    flex: 1 1 180px;
+  }
   .gf-page.gf-pricing .plans,
   .gf-page.gf-pricing .packs {
     grid-template-columns: 1fr;

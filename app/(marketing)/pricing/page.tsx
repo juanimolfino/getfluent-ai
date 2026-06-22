@@ -121,26 +121,37 @@ function PricingCard({
 }
 
 function CheckoutButton({
-	  mode,
-	  planId,
-	  packId,
-	  className,
-	  label
-	}: {
-	  mode: "subscription" | "credits";
-	  planId?: string;
-	  packId?: string;
-	  className: string;
-	  label: string;
-	}) {
+  mode,
+  planId,
+  packId,
+  className,
+  label
+}: {
+  mode: "subscription" | "credits";
+  planId?: string;
+  packId?: string;
+  className: string;
+  label: string;
+}) {
   return (
-	    <form action="/api/stripe/checkout" method="post" className="pc-cta">
-	      <input type="hidden" name="mode" value={mode} />
-	      {planId ? <input type="hidden" name="planId" value={planId} /> : null}
-	      {packId ? <input type="hidden" name="packId" value={packId} /> : null}
-	      <button type="submit" className={className}>
+    <form action="/api/stripe/checkout" method="post" className="pc-cta">
+      <input type="hidden" name="mode" value={mode} />
+      {planId ? <input type="hidden" name="planId" value={planId} /> : null}
+      {packId ? <input type="hidden" name="packId" value={packId} /> : null}
+      <button type="submit" className={className}>
         <CardIcon />
         {label}
+      </button>
+    </form>
+  );
+}
+
+function ManageSubscriptionButton() {
+  return (
+    <form action="/api/stripe/portal" method="post">
+      <button type="submit" className="btn btn-ghost btn-sm">
+        <CardIcon />
+        Manage subscription
       </button>
     </form>
   );
@@ -186,9 +197,12 @@ export default async function PricingPage() {
             <LogoMark id="gf-pricing-mark" />
             GetFluent
           </Link>
-          <Link href="/practice" className="btn btn-ghost btn-sm">
-            Back to practice
-          </Link>
+          <div className="pricing-actions">
+            <ManageSubscriptionButton />
+            <Link href="/practice" className="btn btn-ghost btn-sm">
+              Back to practice
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -203,47 +217,47 @@ export default async function PricingPage() {
               Speak more. Pay <span className="it">less.</span>
             </h1>
             <p>
-              Practice English with flexible credit packs or a monthly Pro plan. Start free - upgrade when Alex becomes
+              Practice English with flexible credit packs or monthly plans. Start free - upgrade when Alex becomes
               part of your routine.
             </p>
           </div>
 
-	          <div className="plans">
-	            <PricingCard
-	              name="Free"
-	              price="$0"
-	              cadence="/mo"
-	              description="Try GetFluent with free credits."
-	              features={["5 free credits once", "Full voice practice", "Conversation analysis"]}
-	              cta={
-	                <button type="button" className="btn btn-ghost pc-cta" disabled>
+          <div className="plans">
+            <PricingCard
+              name="Free"
+              price="$0"
+              cadence="/mo"
+              description="Try GetFluent with free credits."
+              features={["5 free credits once", "Full voice practice", "Conversation analysis"]}
+              cta={
+                <button type="button" className="btn btn-ghost pc-cta" disabled>
                   Current plan
                 </button>
-	              }
-	            />
+              }
+            />
 
-	            {subscriptionProducts.map(({ config, metadata }) => (
-	              <PricingCard
-	                key={config.id}
-	                variant={config.recommended ? "feature" : "default"}
-	                name={config.name}
-	                tag={config.recommended ? "Recommended" : undefined}
-	                credits={displayCredits(metadata)}
-	                price={displayPrice(metadata)}
-	                cadence="/mo"
-	                description={config.description}
-	                features={config.features}
-	                cta={
-	                  <CheckoutButton
-	                    mode="subscription"
-	                    planId={config.id}
-	                    className={config.recommended ? "btn btn-white pc-cta" : "btn btn-ghost pc-cta"}
-	                    label="Choose plan"
-	                  />
-	                }
-	              />
-	            ))}
-	          </div>
+            {subscriptionProducts.map(({ config, metadata }) => (
+              <PricingCard
+                key={config.id}
+                variant={config.recommended ? "feature" : "default"}
+                name={config.name}
+                tag={config.recommended ? "Recommended" : undefined}
+                credits={displayCredits(metadata)}
+                price={displayPrice(metadata)}
+                cadence="/mo"
+                description={config.description}
+                features={config.features}
+                cta={
+                  <CheckoutButton
+                    mode="subscription"
+                    planId={config.id}
+                    className={config.recommended ? "btn btn-white pc-cta" : "btn btn-ghost pc-cta"}
+                    label="Choose plan"
+                  />
+                }
+              />
+            ))}
+          </div>
 
           <div className="packs-head">
             <h2 className="serif">
@@ -252,21 +266,21 @@ export default async function PricingPage() {
             <p>One-time packs that never expire. Perfect if you practice in bursts.</p>
           </div>
 
-	          <div className="packs">
-	            {packProducts.map(({ config, metadata }) => (
-	              <PricingCard
-	                key={config.id}
-	                variant="pack"
-	                name={displayPackName(config.name)}
-	                credits={displayCredits(metadata)}
-	                price={displayPrice(metadata)}
-	                description={config.description}
-	                cta={
-	                  <CheckoutButton
-	                    mode="credits"
-	                    packId={config.id}
-	                    className="btn btn-ghost pc-cta"
-	                    label="Buy pack"
+          <div className="packs">
+            {packProducts.map(({ config, metadata }) => (
+              <PricingCard
+                key={config.id}
+                variant="pack"
+                name={displayPackName(config.name)}
+                credits={displayCredits(metadata)}
+                price={displayPrice(metadata)}
+                description={config.description}
+                cta={
+                  <CheckoutButton
+                    mode="credits"
+                    packId={config.id}
+                    className="btn btn-ghost pc-cta"
+                    label="Buy pack"
                   />
                 }
               />
