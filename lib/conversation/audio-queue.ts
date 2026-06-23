@@ -1,5 +1,7 @@
 "use client";
 
+import { getSharedAudioContext } from "@/lib/conversation/audio-unlock";
+
 export type AudioQueue = {
   enqueue: (base64Chunk: string, seq: number) => void;
   start: () => void;
@@ -218,7 +220,9 @@ function createWebAudioQueue(): AudioQueue {
   const activeSources = new Set<AudioBufferSourceNode>();
 
   function ensureContext() {
-    audioContext ??= new AudioContext();
+    // Reuse the shared, already-unlocked context so mobile playback keeps working
+    // across turns instead of being re-suspended on every new AudioContext.
+    audioContext ??= getSharedAudioContext() ?? new AudioContext();
     return audioContext;
   }
 
@@ -296,7 +300,8 @@ function createWebAudioQueue(): AudioQueue {
       nextStartTime = 0;
       playbackStartedAt = 0;
       playing = false;
-      void audioContext?.close();
+      // Release the local reference but keep the shared context alive (and unlocked)
+      // so the next turn does not need another user gesture to play.
       audioContext = null;
     },
     onEnded(cb) {

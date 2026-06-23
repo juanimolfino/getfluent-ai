@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BarChart3, Languages, Loader2, Mic, Send, Square, Volume2 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { audioRequiresUserGesture, isAudioUnlocked, unlockAudioPlayback } from "@/lib/conversation/audio-unlock";
 import { createBrowserVoicePlayer, type VoicePlayer } from "@/lib/conversation/browser-voice";
 import {
   createDeepgramFluxSpeechProvider,
@@ -23,7 +24,7 @@ import { createPremiumVoicePlayer, type PremiumTimingChar, type PremiumVoicePlay
 import { shouldAttemptDeepgramFluxInput } from "@/lib/conversation/speech-provider-selection";
 import type { SpeechInputProvider, SpeechToTextProvider, SttProviderMetrics } from "@/lib/conversation/speech-input";
 import type { SttMetricEvent } from "@/lib/conversation/stt-metrics";
-import { useConversationStream, type StreamTimingChar, type VoiceStartedMetrics } from "@/lib/hooks/useConversationStream";
+import { useConversationStream, type ConversationPhase, type StreamTimingChar, type VoiceStartedMetrics } from "@/lib/hooks/useConversationStream";
 import type { ConversationTurn, EnglishLevel } from "@/lib/db/schema";
 
 const START_CONVERSATION_TEXT = "[START_CONVERSATION]";
@@ -309,6 +310,10 @@ export function ConversationView({
   const noPremiumAudioTimerRef = useRef<number | null>(null);
   const startedInitialStreamRef = useRef(false);
   const pendingCompletionRef = useRef(false);
+  const audioNeedsGestureRef = useRef(false);
+  const audioUnlockedRef = useRef(false);
+  const pendingGreetingTurnRef = useRef<ConversationTurn | null>(null);
+  const phaseRef = useRef<ConversationPhase>("idle");
   const currentAssistantTextRef = useRef("");
   const premiumPlaybackStartedRef = useRef(false);
   const premiumFallbackRef = useRef(false);
@@ -366,6 +371,16 @@ export function ConversationView({
           return;
         }
 
+        // Touch device with audio still locked: chunks were collected but never played.
+        // Show the text now and replay the stored audio on the first user gesture.
+        if (audioNeedsGestureRef.current && !audioUnlockedRef.current && !premiumPlaybackStartedRef.current) {
+          commitPendingAssistantTurn();
+          setPremiumRevealedText(fullText);
+          pendingGreetingTurnRef.current = assistantTurn;
+          setPhase(pendingCompletionRef.current ? "complete" : "idle");
+          return;
+        }
+
         if (!premiumPlaybackStartedRef.current) {
           fallbackToBrowserVoice("premium stream ended before audio started");
           return;
@@ -378,6 +393,15 @@ export function ConversationView({
       }
 
       setTurns((current) => [...current, assistantTurn]);
+
+      // On touch devices audio cannot autoplay until the user taps. Defer the spoken
+      // reply (keep the text visible) and replay it on the first user gesture.
+      if (audioNeedsGestureRef.current && !audioUnlockedRef.current) {
+        pendingGreetingTurnRef.current = assistantTurn;
+        setPhase(pendingCompletionRef.current ? "complete" : "idle");
+        return;
+      }
+
       setPhase("alex_speaking");
       browserPlayerRef.current?.speak(fullText);
     }
@@ -470,6 +494,17 @@ export function ConversationView({
     }
 
     replayWithBrowserVoice(turn);
+  }
+
+  function playPendingGreeting() {
+    const turn = pendingGreetingTurnRef.current;
+    if (!turn) return;
+    // Don't interrupt a turn the user already started after the deferral.
+    if (phaseRef.current === "user_speaking" || phaseRef.current === "streaming" || phaseRef.current === "alex_speaking") {
+      return;
+    }
+    pendingGreetingTurnRef.current = null;
+    replayAssistantTurn(turn);
   }
 
   function getTurnKey(turn: ConversationTurn, index: number) {
@@ -582,6 +617,15 @@ export function ConversationView({
     if (!isPremium || premiumFallbackRef.current) return;
 
     clearPremiumAudioTimer();
+
+    // On a locked touch device, collect the chunks for later replay but don't start
+    // playback (it would be silently dropped). onComplete handles the deferred replay.
+    if (audioNeedsGestureRef.current && !audioUnlockedRef.current) {
+      currentPremiumAudioChunksRef.current.push({ chunk, seq });
+      setPremiumLiveBubbleActive(true);
+      return;
+    }
+
     const player = premiumPlayerRef.current;
     if (!player) return;
 
@@ -1342,9 +1386,14 @@ export function ConversationView({
 
   useEffect(() => {
     setSpeechSupported(isVoiceInputSupported(isPremium, premiumSttProvider));
+    const handleVoiceStarted = () => {
+      pendingGreetingTurnRef.current = null;
+      markVoiceStarted();
+    };
+
     browserPlayerRef.current = createBrowserVoicePlayer();
     browserPlayerRef.current.setRate(voiceRate);
-    browserPlayerRef.current.onStart(markVoiceStarted);
+    browserPlayerRef.current.onStart(handleVoiceStarted);
     browserPlayerRef.current.onEnd(() => {
       setPhase(pendingCompletionRef.current ? "complete" : "idle");
       pendingCompletionRef.current = false;
@@ -1355,7 +1404,7 @@ export function ConversationView({
     premiumPlayerRef.current.onStart(() => {
       setPhase("alex_speaking");
     });
-    premiumPlayerRef.current.onAudioStart(markVoiceStarted);
+    premiumPlayerRef.current.onAudioStart(handleVoiceStarted);
     premiumPlayerRef.current.onEnd(finishAssistantAudioPhase);
     premiumPlayerRef.current.onError((error) => fallbackToBrowserVoice(error.message));
 
@@ -1380,6 +1429,35 @@ export function ConversationView({
     browserPlayerRef.current?.setRate(voiceRate);
     premiumFallbackVoiceRef.current?.setRate(voiceRate);
   }, [voiceRate]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    audioNeedsGestureRef.current = audioRequiresUserGesture();
+    audioUnlockedRef.current = isAudioUnlocked();
+    if (!audioNeedsGestureRef.current || audioUnlockedRef.current) return;
+
+    const handleFirstGesture = () => {
+      unlockAudioPlayback();
+      audioUnlockedRef.current = true;
+      removeListeners();
+      // window listeners bubble after React's handlers, so a tapped control (e.g. the
+      // mic button) has already updated the phase; playPendingGreeting skips if mid-turn.
+      // Running synchronously keeps the user gesture alive for iOS HTMLAudio playback.
+      playPendingGreeting();
+    };
+
+    const events: (keyof WindowEventMap)[] = ["pointerdown", "touchend", "keydown"];
+    function removeListeners() {
+      events.forEach((event) => window.removeEventListener(event, handleFirstGesture));
+    }
+    events.forEach((event) => window.addEventListener(event, handleFirstGesture, { passive: true }));
+
+    return removeListeners;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
