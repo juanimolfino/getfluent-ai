@@ -6,6 +6,10 @@ alter table credits enable row level security;
 alter table subscriptions enable row level security;
 alter table jobs enable row level security;
 alter table transactions enable row level security;
+alter table user_language_profiles enable row level security;
+alter table conversation_sessions enable row level security;
+alter table conversation_analyses enable row level security;
+alter table exercise_sets enable row level security;
 
 create policy "users can read own profile"
 on users for select
@@ -31,6 +35,30 @@ using (
 
 create policy "users can read own transactions"
 on transactions for select
+using (
+  user_id in (select id from users where auth_user_id = auth.uid())
+);
+
+create policy "users can read own user_language_profiles"
+on user_language_profiles for select
+using (
+  user_id in (select id from users where auth_user_id = auth.uid())
+);
+
+create policy "users can read own conversation_sessions"
+on conversation_sessions for select
+using (
+  user_id in (select id from users where auth_user_id = auth.uid())
+);
+
+create policy "users can read own conversation_analyses"
+on conversation_analyses for select
+using (
+  user_id in (select id from users where auth_user_id = auth.uid())
+);
+
+create policy "users can read own exercise_sets"
+on exercise_sets for select
 using (
   user_id in (select id from users where auth_user_id = auth.uid())
 );

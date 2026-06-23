@@ -5,9 +5,13 @@ import { createPendingJob, ensureUserProfile, refundJobCredits } from "@/lib/db/
 import { releaseJobSlot, reserveJobSlot } from "@/lib/redis/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { inngest } from "@/lib/inngest/client";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 import type { Job } from "@/lib/db/schema";
 
 export async function POST(request: Request) {
+  const originResponse = rejectForbiddenOrigin(request, "jobs_create");
+  if (originResponse) return originResponse;
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { completeExerciseSet } from "@/lib/db/fluent-queries";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 
 const completeSchema = z.object({
   exerciseSetId: z.string().uuid(),
@@ -10,6 +11,9 @@ const completeSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const originResponse = rejectForbiddenOrigin(request, "exercise_complete");
+    if (originResponse) return originResponse;
+
     const user = await getCurrentUserProfile();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

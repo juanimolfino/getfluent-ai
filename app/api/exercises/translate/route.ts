@@ -4,6 +4,7 @@ import { getCurrentUserProfile } from "@/lib/auth/current-user";
 import { CONVERSATION_MODEL, extractTextFromMessage, getAnthropic } from "@/lib/conversation/anthropic";
 import { getSessionState, hasPaidConversationCredit } from "@/lib/conversation/session-state";
 import { getConversationAnalysisById, getUserLanguageProfile } from "@/lib/db/fluent-queries";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 import { enforceExpensiveEndpointRateLimit, enforceMonthlyUsageLimit } from "@/lib/http/rate-limit";
 import type { NativeLanguage } from "@/lib/db/schema";
 
@@ -31,6 +32,9 @@ function jsonNoStore(payload: unknown, init?: ResponseInit) {
 
 export async function POST(request: Request) {
   try {
+    const originResponse = rejectForbiddenOrigin(request, "exercise_translate");
+    if (originResponse) return originResponse;
+
     const user = await getCurrentUserProfile();
     if (!user) return jsonNoStore({ error: "Unauthorized" }, { status: 401 });
 

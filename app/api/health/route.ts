@@ -1,6 +1,15 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+
+function secretsMatch(supplied: string | null, configured: string | undefined): boolean {
+  if (!supplied || !configured) return false;
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(configured);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 const envKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
@@ -20,7 +29,7 @@ export async function GET(request: Request) {
   const authorization = request.headers.get("authorization");
   const suppliedSecret = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : null;
 
-  if (process.env.NODE_ENV === "production" && (!configuredSecret || suppliedSecret !== configuredSecret)) {
+  if (process.env.NODE_ENV === "production" && !secretsMatch(suppliedSecret, configuredSecret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

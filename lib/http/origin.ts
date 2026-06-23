@@ -9,7 +9,7 @@ function normalizeOrigin(value: string | null | undefined) {
 
 export function isAllowedRequestOrigin(request: Request) {
   const origin = normalizeOrigin(request.headers.get("origin"));
-  if (!origin) return true;
+  if (!origin) return false;
 
   const requestOrigin = normalizeOrigin(request.url);
   const appOrigin = normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL);
