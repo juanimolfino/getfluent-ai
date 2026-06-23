@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { BillingPortalButton } from "@/components/billing/billing-portal-button";
 import { DashboardAutoRefresh } from "@/components/dashboard/dashboard-auto-refresh";
 import { getRecentSessionStates } from "@/lib/conversation/session-state";
 import { getDashboard, ensureUserProfile } from "@/lib/db/queries";
@@ -243,12 +244,10 @@ export default async function DashboardPage() {
               <CardIcon />
               Buy credits
             </Link>
-            <form action="/api/stripe/portal" method="post">
-              <button className="iconlink" type="submit">
-                <BillingIcon />
-                Billing
-              </button>
-            </form>
+            <BillingPortalButton className="iconlink">
+              <BillingIcon />
+              Billing
+            </BillingPortalButton>
             <form action="/logout" method="post">
               <button className="iconlink" type="submit">
                 <LogoutIcon />

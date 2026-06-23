@@ -47,19 +47,29 @@ function mockDb() {
   const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
   const values = vi.fn(() => ({ onConflictDoUpdate }));
   const insert = vi.fn(() => ({ values }));
-  mockGetDb.mockReturnValue({ update, insert } as unknown as ReturnType<typeof getDb>);
-  return { update, insert, values, onConflictDoUpdate };
+  const findUser = vi.fn().mockResolvedValue(null);
+  const findSubscription = vi.fn().mockResolvedValue(null);
+  mockGetDb.mockReturnValue({
+    update,
+    insert,
+    query: {
+      users: { findFirst: findUser },
+      subscriptions: { findFirst: findSubscription }
+    }
+  } as unknown as ReturnType<typeof getDb>);
+  return { update, insert, values, onConflictDoUpdate, findUser, findSubscription };
 }
 
 describe("POST /api/stripe/webhook", () => {
   const constructEvent = vi.fn();
   const listLineItems = vi.fn();
   const retrieveSubscription = vi.fn();
+  let dbMocks: ReturnType<typeof mockDb>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
-    mockDb();
+    dbMocks = mockDb();
     mockGetStripe.mockReturnValue({
       webhooks: { constructEvent },
       checkout: { sessions: { listLineItems } },
@@ -209,6 +219,57 @@ describe("POST /api/stripe/webhook", () => {
       amountCents: 890
     }, "evt_invoice_new_shape");
     expect(mockAddPackCredits).not.toHaveBeenCalled();
+  });
+
+  it("resolves invoice.paid user by Stripe customer when metadata is missing", async () => {
+    constructEvent.mockReturnValue({
+      id: "evt_invoice_customer_fallback",
+      type: "invoice.paid",
+      data: {
+        object: {
+          subscription: "sub_without_metadata",
+          amount_paid: 890
+        }
+      }
+    });
+    dbMocks.findUser.mockResolvedValue({ id: "user-1" });
+    retrieveSubscription.mockResolvedValue({
+      id: "sub_without_metadata",
+      customer: "cus_existing",
+      status: "active",
+      cancel_at_period_end: false,
+      metadata: {},
+      items: {
+        data: [
+          {
+            current_period_start: 1_700_000_000,
+            current_period_end: 1_702_592_000,
+            price: { id: "price_starter" }
+          }
+        ]
+      }
+    });
+    mockGetStripePriceCreditMetadata.mockResolvedValue({
+      priceId: "price_starter",
+      productId: "prod_starter",
+      productName: "Fluent Starter",
+      credits: 15,
+      type: "subscription",
+      unitAmount: 890,
+      currency: "usd",
+      recurringInterval: "month"
+    });
+
+    const response = await POST(webhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(dbMocks.findUser).toHaveBeenCalled();
+    expect(mockResetSubscriptionCredits).toHaveBeenCalledWith("user-1", 15, {
+      kind: "subscription",
+      subscriptionId: "sub_without_metadata",
+      priceId: "price_starter",
+      amountCents: 890
+    }, "evt_invoice_customer_fallback");
   });
 
   it("rejects unsigned webhooks before granting credits", async () => {

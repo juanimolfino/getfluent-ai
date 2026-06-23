@@ -1,34 +1,47 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { getDb } from "@/lib/db";
 import { ensureUserProfile } from "@/lib/db/queries";
-import { users } from "@/lib/db/schema";
 import { getStripe } from "@/lib/stripe/client";
+import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+function getBillingPortalErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (/configuration|customer portal/i.test(message)) {
+    return "Stripe Billing Portal is not configured. Configure it in Stripe Dashboard > Billing > Customer portal.";
+  }
+  return "We couldn't open billing. Please try again or contact support.";
+}
+
 export async function POST(request: Request) {
+  const originResponse = rejectForbiddenOrigin(request, "stripe_portal");
+  if (originResponse) return originResponse;
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user }
   } = await supabase.auth.getUser();
 
-  if (!user) return NextResponse.redirect(new URL("/login", request.url), 303);
+  if (!user) return NextResponse.json({ error: "You must be logged in to manage billing." }, { status: 401 });
 
   const profile = await ensureUserProfile(user);
-  const stripe = getStripe();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
-  let customerId = profile.stripeCustomerId;
 
-  if (!customerId) {
-    const customer = await stripe.customers.create({ email: profile.email, metadata: { userId: profile.id } });
-    customerId = customer.id;
-    await getDb().update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, profile.id));
+  if (!profile.stripeCustomerId) {
+    return NextResponse.json({
+      error: "No Stripe customer is linked to this account yet. Please buy a plan or contact support."
+    }, { status: 400 });
   }
 
-  const portal = await stripe.billingPortal.sessions.create({
-    customer: customerId,
-    return_url: `${appUrl}/dashboard`
-  });
+  try {
+    const portal = await getStripe().billingPortal.sessions.create({
+      customer: profile.stripeCustomerId,
+      return_url: `${appUrl}/dashboard`
+    });
 
-  return NextResponse.redirect(portal.url, 303);
+    return NextResponse.json({ url: portal.url });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not create Stripe billing portal session";
+    console.error("Stripe billing portal session failed", { userId: profile.id, message });
+    return NextResponse.json({ error: getBillingPortalErrorMessage(error) }, { status: 502 });
+  }
 }

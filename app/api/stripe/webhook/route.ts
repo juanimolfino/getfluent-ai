@@ -68,6 +68,25 @@ function getSubscriptionPeriod(subscription: Stripe.Subscription & {
   };
 }
 
+function getCustomerId(customer: string | Stripe.Customer | Stripe.DeletedCustomer | null | undefined) {
+  if (!customer) return null;
+  return typeof customer === "string" ? customer : customer.id;
+}
+
+async function findUserIdByStripeCustomerId(customerId: string | null) {
+  if (!customerId) return null;
+  const user = await getDb().query.users.findFirst({ where: eq(users.stripeCustomerId, customerId) });
+  return user?.id ?? null;
+}
+
+async function findUserIdByStripeSubscriptionId(subscriptionId: string | null) {
+  if (!subscriptionId) return null;
+  const subscription = await getDb().query.subscriptions.findFirst({
+    where: eq(subscriptions.stripeSubscriptionId, subscriptionId)
+  });
+  return subscription?.userId ?? null;
+}
+
 export async function POST(request: Request) {
   const payload = await request.text();
   const signature = request.headers.get("stripe-signature");
@@ -83,9 +102,10 @@ export async function POST(request: Request) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const userId = session.metadata?.userId;
-    if (userId && session.customer) {
-      await getDb().update(users).set({ stripeCustomerId: String(session.customer) }).where(eq(users.id, userId));
+    const customerId = getCustomerId(session.customer);
+    const userId = session.metadata?.userId ?? session.client_reference_id ?? await findUserIdByStripeCustomerId(customerId);
+    if (userId && customerId) {
+      await getDb().update(users).set({ stripeCustomerId: customerId, updatedAt: new Date() }).where(eq(users.id, userId));
     }
     if (userId && session.metadata?.kind === "pack") {
       const priceId = await getCheckoutSessionPriceId(session.id);
@@ -110,7 +130,12 @@ export async function POST(request: Request) {
         current_period_start?: number;
         current_period_end?: number;
       };
-      const userId = subscription.metadata.userId ?? invoiceMetadata.userId;
+      const customerId = getCustomerId(subscription.customer);
+      const userId =
+        subscription.metadata.userId ??
+        invoiceMetadata.userId ??
+        await findUserIdByStripeSubscriptionId(subscriptionId) ??
+        await findUserIdByStripeCustomerId(customerId);
       if (userId) {
         const priceId = subscription.metadata.priceId || invoiceMetadata.priceId || subscription.items.data[0]?.price.id;
         if (!priceId) return NextResponse.json({ error: "Missing subscription price" }, { status: 400 });

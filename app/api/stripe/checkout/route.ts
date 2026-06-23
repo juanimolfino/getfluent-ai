@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/lib/db";
 import { ensureUserProfile } from "@/lib/db/queries";
+import { users } from "@/lib/db/schema";
 import {
   getConfiguredStripePriceMetadata,
   getCreditPack,
@@ -9,6 +12,18 @@ import {
 import { getStripe } from "@/lib/stripe/client";
 import { rejectForbiddenOrigin } from "@/lib/http/forbidden-origin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+async function getOrCreateStripeCustomer(profile: Awaited<ReturnType<typeof ensureUserProfile>>) {
+  if (profile.stripeCustomerId) return profile.stripeCustomerId;
+
+  const customer = await getStripe().customers.create({
+    email: profile.email,
+    metadata: { userId: profile.id }
+  });
+
+  await getDb().update(users).set({ stripeCustomerId: customer.id, updatedAt: new Date() }).where(eq(users.id, profile.id));
+  return customer.id;
+}
 
 export async function POST(request: Request) {
   const originResponse = rejectForbiddenOrigin(request, "stripe_checkout");
@@ -25,6 +40,7 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const mode = String(form.get("mode") ?? "credits");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  const customer = await getOrCreateStripeCustomer(profile);
 
   if (mode === "subscription") {
     const product = getSubscriptionProduct(String(form.get("planId") ?? "plus"));
@@ -37,7 +53,7 @@ export async function POST(request: Request) {
 
     const session = await getStripe().checkout.sessions.create({
       mode: "subscription",
-      customer_email: profile.email,
+      customer,
       line_items: [{ price, quantity: 1 }],
       success_url: `${appUrl}/dashboard?checkout=success`,
       cancel_url: `${appUrl}/pricing`,
@@ -58,7 +74,7 @@ export async function POST(request: Request) {
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
-    customer_email: profile.email,
+    customer,
     line_items: [{ price, quantity: 1 }],
     success_url: `${appUrl}/dashboard?checkout=success`,
     cancel_url: `${appUrl}/pricing`,

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/lib/db";
 import { ensureUserProfile } from "@/lib/db/queries";
 import { getConfiguredStripePriceMetadata } from "@/lib/stripe/pricing";
 import { getStripe } from "@/lib/stripe/client";
@@ -7,6 +8,10 @@ import { POST } from "@/app/api/stripe/checkout/route";
 
 vi.mock("@/lib/db/queries", () => ({
   ensureUserProfile: vi.fn()
+}));
+
+vi.mock("@/lib/db", () => ({
+  getDb: vi.fn()
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -27,6 +32,7 @@ vi.mock("@/lib/stripe/pricing", async (importOriginal) => {
 });
 
 const mockEnsureUserProfile = vi.mocked(ensureUserProfile);
+const mockGetDb = vi.mocked(getDb);
 const mockCreateSupabaseServerClient = vi.mocked(createSupabaseServerClient);
 const mockGetStripe = vi.mocked(getStripe);
 const mockGetConfiguredStripePriceMetadata = vi.mocked(getConfiguredStripePriceMetadata);
@@ -44,6 +50,10 @@ function checkoutRequest(form: Record<string, string>, origin = "http://localhos
 
 describe("POST /api/stripe/checkout", () => {
   const createCheckoutSession = vi.fn();
+  const createCustomer = vi.fn();
+  const updateUserWhere = vi.fn().mockResolvedValue(undefined);
+  const updateUserSet = vi.fn(() => ({ where: updateUserWhere }));
+  const updateUser = vi.fn(() => ({ set: updateUserSet }));
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -52,14 +62,23 @@ describe("POST /api/stripe/checkout", () => {
         getUser: vi.fn().mockResolvedValue({ data: { user: { id: "auth-user-1", email: "user@example.com" } } })
       }
     } as unknown as Awaited<ReturnType<typeof createSupabaseServerClient>>);
-    mockEnsureUserProfile.mockResolvedValue({ id: "user-1", email: "user@example.com" } as Awaited<ReturnType<typeof ensureUserProfile>>);
+    mockEnsureUserProfile.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      stripeCustomerId: null
+    } as Awaited<ReturnType<typeof ensureUserProfile>>);
+    mockGetDb.mockReturnValue({ update: updateUser } as unknown as ReturnType<typeof getDb>);
     mockGetStripe.mockReturnValue({
+      customers: {
+        create: createCustomer
+      },
       checkout: {
         sessions: {
           create: createCheckoutSession
         }
       }
     } as unknown as ReturnType<typeof getStripe>);
+    createCustomer.mockResolvedValue({ id: "cus_new" });
     createCheckoutSession.mockResolvedValue({ url: "https://checkout.stripe.test/session" });
   });
 
@@ -89,11 +108,43 @@ describe("POST /api/stripe/checkout", () => {
     expect(response.headers.get("location")).toBe("https://checkout.stripe.test/session");
     expect(createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({
       mode: "subscription",
-      customer_email: "user@example.com",
+      customer: "cus_new",
       client_reference_id: "user-1",
       line_items: [{ price: "price_stripe_price_id_starter_monthly", quantity: 1 }],
       metadata: expect.objectContaining({ userId: "user-1", kind: "subscription", plan: "starter" }),
       subscription_data: { metadata: expect.objectContaining({ userId: "user-1", plan: "starter" }) }
+    }));
+    expect(createCustomer).toHaveBeenCalledWith({
+      email: "user@example.com",
+      metadata: { userId: "user-1" }
+    });
+    expect(updateUser).toHaveBeenCalled();
+  });
+
+  it("reuses an existing Stripe customer for checkout", async () => {
+    mockEnsureUserProfile.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      stripeCustomerId: "cus_existing"
+    } as Awaited<ReturnType<typeof ensureUserProfile>>);
+    mockGetConfiguredStripePriceMetadata.mockResolvedValue({
+      priceId: "price_starter",
+      productId: "prod_starter",
+      productName: "Fluent Starter",
+      credits: 15,
+      type: "subscription",
+      unitAmount: 890,
+      currency: "usd",
+      recurringInterval: "month"
+    });
+
+    const response = await POST(checkoutRequest({ mode: "subscription", planId: "starter" }));
+
+    expect(response.status).toBe(303);
+    expect(createCustomer).not.toHaveBeenCalled();
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({
+      customer: "cus_existing"
     }));
   });
 
@@ -114,7 +165,7 @@ describe("POST /api/stripe/checkout", () => {
     expect(response.status).toBe(303);
     expect(createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({
       mode: "payment",
-      customer_email: "user@example.com",
+      customer: "cus_new",
       client_reference_id: "user-1",
       line_items: [{ price: "price_stripe_price_id_pack_mini", quantity: 1 }],
       metadata: expect.objectContaining({ userId: "user-1", kind: "pack", packId: "pack_mini" })

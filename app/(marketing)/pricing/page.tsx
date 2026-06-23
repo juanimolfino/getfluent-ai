@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BillingPortalButton } from "@/components/billing/billing-portal-button";
 import {
   CREDIT_PACKS,
   SUBSCRIPTION_PRODUCTS,
@@ -148,12 +149,10 @@ function CheckoutButton({
 
 function ManageSubscriptionButton() {
   return (
-    <form action="/api/stripe/portal" method="post">
-      <button type="submit" className="btn btn-ghost btn-sm">
-        <CardIcon />
-        Manage subscription
-      </button>
-    </form>
+    <BillingPortalButton className="btn btn-ghost btn-sm">
+      <CardIcon />
+      Manage billing
+    </BillingPortalButton>
   );
 }
 
