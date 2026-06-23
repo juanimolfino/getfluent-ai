@@ -80,3 +80,30 @@ Cambios realizados:
 
 Pendiente:
 - Probar con Stripe CLI en local y tarjetas de test.
+
+## 2026-06-22 - Produccion aigetfluent + portal + invoice.paid
+
+Cambios y verificaciones:
+- URL oficial: `https://www.aigetfluent.com`.
+- Webhook de produccion esperado: `https://www.aigetfluent.com/api/stripe/webhook`.
+- Eventos necesarios en Stripe: `checkout.session.completed`, `invoice.paid`, `customer.subscription.deleted`.
+- Compra real de suscripcion verificada en Stripe live: `checkout.session.completed` e `invoice.paid` llegaron con HTTP 200.
+- Bug critico encontrado: con API Stripe nueva, `invoice.paid` no traia la subscription en `invoice.subscription`; venia en `invoice.parent.subscription_details.subscription`.
+- Fix aplicado: webhook resuelve subscription id desde legacy `invoice.subscription`, `invoice.parent.subscription_details.subscription` y fallback por line items.
+- Fix aplicado: `invoice.paid` resuelve user por `subscription.metadata.userId`, metadata de invoice, `stripeSubscriptionId` guardado o `stripeCustomerId` guardado.
+- Fix aplicado: `checkout.session.completed` guarda `users.stripeCustomerId` cuando Stripe devuelve `session.customer`.
+- Checkout ahora reutiliza `users.stripeCustomerId`; si falta, crea Stripe Customer y lo guarda antes del Checkout Session.
+- Portal de billing usa `POST /api/stripe/portal`, requiere auth y `stripeCustomerId`; no crea customer si falta.
+- Frontend Billing/Manage billing llama al endpoint, recibe `{ url }` y redirige a Stripe Billing Portal con `window.location.href`.
+- El portal usa `return_url=${NEXT_PUBLIC_APP_URL}/dashboard`.
+- Si Stripe Customer Portal no esta configurado en Dashboard > Billing > Customer portal, el endpoint devuelve error claro.
+
+Tests agregados/corridos:
+- Portal: usuario sin `stripeCustomerId` devuelve error claro; usuario con `stripeCustomerId` crea session; portal no configurado devuelve error claro.
+- Boton frontend: POST a `/api/stripe/portal`, error humano, redireccion cuando hay URL.
+- Checkout: crea customer si falta; reutiliza customer existente.
+- Webhook: `invoice.paid` con forma nueva y resolucion por customer.
+
+Pendiente operacional:
+- Confirmar en Vercel produccion `NEXT_PUBLIC_APP_URL=https://www.aigetfluent.com`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` y todos los `STRIPE_PRICE_ID_*`.
+- Confirmar manualmente Stripe Billing Portal configurado en Stripe live.

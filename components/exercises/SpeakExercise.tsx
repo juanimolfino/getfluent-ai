@@ -1,8 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic, Square } from "lucide-react";
-import { createDeepgramFluxSpeechProvider } from "@/lib/conversation/deepgram-flux-speech";
+import {
+  createDeepgramFluxSpeechProvider,
+  fetchDeepgramFluxToken,
+  type DeepgramFluxToken
+} from "@/lib/conversation/deepgram-flux-speech";
 import type { SpeechToTextProvider } from "@/lib/conversation/speech-input";
 import type { SpeakExercise as SpeakExerciseType } from "@/lib/exercises/types";
 
@@ -46,6 +50,14 @@ type SpeechFeedback = {
   correctedVersion: string;
 };
 
+type DeepgramTokenCache = {
+  token?: DeepgramFluxToken;
+  promise?: Promise<DeepgramFluxToken>;
+  expiresAt?: number;
+};
+
+const DEEPGRAM_PREFETCH_MIN_TOKEN_MS = 5000;
+
 function getSpeechRecognition() {
   if (typeof window === "undefined") return null;
   const speechWindow = window as typeof window & {
@@ -55,9 +67,19 @@ function getSpeechRecognition() {
   return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
 }
 
+function isDeepgramFluxInputSupported() {
+  if (typeof window === "undefined") return false;
+  try {
+    return createDeepgramFluxSpeechProvider().isSupported();
+  } catch {
+    return false;
+  }
+}
+
 export function SpeakExercise({ sessionId, analysisId, weakPointId, exercise, onComplete }: Props) {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const deepgramRef = useRef<SpeechToTextProvider | null>(null);
+  const deepgramTokenCacheRef = useRef<DeepgramTokenCache>({});
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [feedback, setFeedback] = useState<SpeechFeedback | null>(null);
@@ -94,10 +116,67 @@ export function SpeakExercise({ sessionId, analysisId, weakPointId, exercise, on
     return true;
   }
 
-  async function startListening() {
+  const warmDeepgramToken = useCallback(() => {
+    if (!isDeepgramFluxInputSupported()) return undefined;
+
+    const cache = deepgramTokenCacheRef.current;
+    const now = performance.now();
+    if (cache.token && cache.expiresAt && cache.expiresAt - now > DEEPGRAM_PREFETCH_MIN_TOKEN_MS) {
+      return Promise.resolve(cache.token);
+    }
+    if (cache.promise) return cache.promise;
+
+    const promise = fetchDeepgramFluxToken({ sessionId })
+      .then((token) => {
+        if (deepgramTokenCacheRef.current.promise === promise) {
+          deepgramTokenCacheRef.current = {
+            token,
+            expiresAt: performance.now() + token.expiresIn * 1000
+          };
+        }
+        return token;
+      })
+      .catch((tokenError) => {
+        if (deepgramTokenCacheRef.current.promise === promise) deepgramTokenCacheRef.current = {};
+        throw tokenError;
+      });
+
+    deepgramTokenCacheRef.current = { promise };
+    void promise.catch(() => {});
+    return promise;
+  }, [sessionId]);
+
+  function consumeDeepgramPrefetchedToken() {
+    const cache = deepgramTokenCacheRef.current;
+    const now = performance.now();
+
+    if (cache.token && cache.expiresAt && cache.expiresAt - now > DEEPGRAM_PREFETCH_MIN_TOKEN_MS) {
+      const token = cache.token;
+      deepgramTokenCacheRef.current = {};
+      return Promise.resolve(token);
+    }
+
+    if (cache.promise) {
+      const promise = cache.promise;
+      deepgramTokenCacheRef.current = {};
+      return promise;
+    }
+
+    return undefined;
+  }
+
+  useEffect(() => {
+    warmDeepgramToken();
+    return () => {
+      deepgramTokenCacheRef.current = {};
+    };
+  }, [warmDeepgramToken]);
+
+  async function startDeepgramListening() {
     setError(null);
     const deepgram = createDeepgramFluxSpeechProvider({
       sessionId,
+      prefetchedTokenPromise: consumeDeepgramPrefetchedToken(),
       onPartialTranscript(payload) {
         setTranscript(payload.transcript);
       },
@@ -121,7 +200,17 @@ export function SpeakExercise({ sessionId, analysisId, weakPointId, exercise, on
 
     deepgramRef.current = deepgram;
     setIsListening(true);
-    await deepgram.start();
+    try {
+      await deepgram.start();
+    } catch {
+      deepgramRef.current = null;
+      setIsListening(false);
+      if (!startBrowserListening()) setError("Speech recognition stopped. Try again or type your answer.");
+    }
+  }
+
+  function startListening() {
+    void startDeepgramListening();
   }
 
   function stopListening() {

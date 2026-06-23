@@ -10,18 +10,20 @@ Production:
 
 ```text
 Site URL:
-https://aigetfluent.com
+https://www.aigetfluent.com
 
 Redirect URLs:
 https://aigetfluent.com/**
 https://aigetfluent.com/callback
+https://www.aigetfluent.com/**
+https://www.aigetfluent.com/callback
 ```
 
 Local development:
 
 ```text
 Site URL:
-https://aigetfluent.com
+https://www.aigetfluent.com
 
 Redirect URLs:
 http://localhost:3000/**
@@ -55,7 +57,7 @@ NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 DATABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
-NEXT_PUBLIC_APP_URL=https://aigetfluent.com
+NEXT_PUBLIC_APP_URL=https://www.aigetfluent.com
 FREE_SIGNUP_CREDITS=5
 ```
 
@@ -71,6 +73,20 @@ Required later for Fluent conversation:
 ```text
 ANTHROPIC_API_KEY
 ELEVENLABS_API_KEY
+```
+
+Required for Stripe billing in production:
+
+```text
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+STRIPE_PRICE_ID_STARTER_MONTHLY
+STRIPE_PRICE_ID_PLUS_MONTHLY
+STRIPE_PRICE_ID_PRO_MONTHLY
+STRIPE_PRICE_ID_PACK_MINI
+STRIPE_PRICE_ID_PACK_MEDIO
+STRIPE_PRICE_ID_PACK_BIG
 ```
 
 Required for premium Deepgram voice input:
@@ -170,6 +186,20 @@ checkout.session.completed
 invoice.paid
 customer.subscription.deleted
 ```
+
+Production webhook endpoint:
+
+```text
+https://www.aigetfluent.com/api/stripe/webhook
+```
+
+Stripe Billing Portal:
+
+- Configure manually in Stripe Dashboard > Billing > Customer portal.
+- The app opens it through `POST /api/stripe/portal`.
+- The portal endpoint requires an authenticated app user with a saved `users.stripeCustomerId`.
+- The return URL is `${NEXT_PUBLIC_APP_URL}/dashboard`, currently `https://www.aigetfluent.com/dashboard`.
+- If Stripe Customer Portal is not configured, Stripe rejects session creation and the app returns a clear configuration error.
 
 Credit behavior:
 

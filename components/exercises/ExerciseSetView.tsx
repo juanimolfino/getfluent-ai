@@ -23,17 +23,75 @@ type TheoryTranslation = {
   translation: string;
   targetLanguage: string;
 };
+type ExerciseProgress = {
+  exerciseSetId: string;
+  exerciseCount: number;
+  step: Step;
+  currentIndex: number;
+  score: number;
+};
 
 const exerciseSetCache = new Map<string, ExerciseSet>();
 const exerciseSetRequestCache = new Map<string, Promise<ExerciseSet>>();
 const audioUrlCache = new Map<string, string>();
 const translationCache = new Map<string, TheoryTranslation>();
+const progressStoragePrefix = "getfluent:exercise-progress:";
 
 function scoreMessage(score: number, total: number) {
   const percent = total ? score / total : 0;
   if (percent >= 0.85) return "Excellent. This point is becoming natural.";
   if (percent >= 0.6) return "Good progress. A little more practice will make it stick.";
   return "Good start. This is exactly the kind of point that improves with repetition.";
+}
+
+function getProgressStorageKey(cacheKey: string) {
+  return `${progressStoragePrefix}${cacheKey}`;
+}
+
+function readStoredProgress(cacheKey: string, exerciseSet: ExerciseSet) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(getProgressStorageKey(cacheKey));
+    if (!raw) return null;
+    const progress = JSON.parse(raw) as Partial<ExerciseProgress>;
+    const validStep = progress.step === "theory" || progress.step === "exercises" || progress.step === "summary";
+    if (
+      progress.exerciseSetId !== exerciseSet.id ||
+      progress.exerciseCount !== exerciseSet.exercises.length ||
+      !validStep ||
+      typeof progress.currentIndex !== "number" ||
+      typeof progress.score !== "number"
+    ) {
+      return null;
+    }
+
+    const step = progress.step as Step;
+    return {
+      step,
+      currentIndex: Math.min(Math.max(0, progress.currentIndex), Math.max(0, exerciseSet.exercises.length - 1)),
+      score: Math.min(Math.max(0, progress.score), exerciseSet.exercises.length)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProgress(cacheKey: string, exerciseSet: ExerciseSet, progress: Omit<ExerciseProgress, "exerciseSetId" | "exerciseCount">) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      getProgressStorageKey(cacheKey),
+      JSON.stringify({
+        ...progress,
+        exerciseSetId: exerciseSet.id,
+        exerciseCount: exerciseSet.exercises.length
+      })
+    );
+  } catch {
+    // Progress persistence is best-effort; the practice flow still works without localStorage.
+  }
 }
 
 export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExerciseSet }: Props) {
@@ -49,6 +107,15 @@ export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExe
   const [error, setError] = useState<string | null>(null);
   const [translation, setTranslation] = useState<TheoryTranslation | null>(translationCache.get(cacheKey) ?? null);
   const [showTranslation, setShowTranslation] = useState(false);
+  const [hasRestoredProgress, setHasRestoredProgress] = useState(false);
+
+  useEffect(() => {
+    setStep("theory");
+    setCurrentIndex(0);
+    setScore(0);
+    setShowTranslation(false);
+    setHasRestoredProgress(false);
+  }, [cacheKey]);
 
   useEffect(() => {
     voiceRef.current = createBrowserVoicePlayer();
@@ -101,6 +168,22 @@ export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExe
       cancelled = true;
     };
   }, [analysisId, weakPointId, cacheKey, initialExerciseSet]);
+
+  useEffect(() => {
+    if (!exerciseSet || hasRestoredProgress) return;
+    const progress = readStoredProgress(cacheKey, exerciseSet);
+    if (progress) {
+      setStep(progress.step);
+      setCurrentIndex(progress.currentIndex);
+      setScore(progress.score);
+    }
+    setHasRestoredProgress(true);
+  }, [cacheKey, exerciseSet, hasRestoredProgress]);
+
+  useEffect(() => {
+    if (!exerciseSet || !hasRestoredProgress) return;
+    writeStoredProgress(cacheKey, exerciseSet, { step, currentIndex, score });
+  }, [cacheKey, currentIndex, exerciseSet, hasRestoredProgress, score, step]);
 
   useEffect(() => {
     if (!exerciseSet || translationCache.has(cacheKey)) return;
@@ -190,6 +273,11 @@ export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExe
     }
 
     setCurrentIndex((index) => index + 1);
+  }
+
+  function startExercises() {
+    setStep("exercises");
+    if (exerciseSet) writeStoredProgress(cacheKey, exerciseSet, { step: "exercises", currentIndex, score });
   }
 
   if (isLoading) {
@@ -304,7 +392,7 @@ export function ExerciseSetView({ sessionId, analysisId, weakPointId, initialExe
 
       <button
         type="button"
-        onClick={() => setStep("exercises")}
+        onClick={startExercises}
         className="mt-8 rounded-full bg-slate-950 px-6 py-3 text-sm font-semibold text-white"
       >
         Start exercises

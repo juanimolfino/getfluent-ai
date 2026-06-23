@@ -19,7 +19,7 @@ This repo is a production-oriented AI SaaS boilerplate built to launch small AI 
 - **OpenAI TTS**: demo text-to-speech provider. Adapter is `lib/ai/providers/openai-tts.ts`.
 - **Stripe**: checkout, subscriptions, customer portal, and webhook-driven credit allocation. Client is `lib/stripe/client.ts`, pricing config is `lib/stripe/pricing.ts`, and route handlers are under `app/api/stripe/`.
 - **Resend + React Email-style templates**: optional transactional email for welcome, purchase, and job-ready notifications. Templates are in `emails/`; safe send helpers are in `lib/email/send.ts`. Email failures are intentionally non-blocking.
-- **Vercel**: deployment target. Production currently runs at `https://ai-project-1-gold.vercel.app`.
+- **Vercel**: deployment target. Production official URL is `https://www.aigetfluent.com`; apex `https://aigetfluent.com` redirects to `www`.
 
 ## 2. Flujo de un job de AI de punta a punta
 
@@ -77,7 +77,7 @@ This repo is a production-oriented AI SaaS boilerplate built to launch small AI 
   - `app/layout.tsx`: root HTML layout and global metadata.
   - `app/globals.css`: global CSS and theme tokens.
   - `app/(marketing)/page.tsx`: public landing page.
-  - `app/(marketing)/pricing/page.tsx`: pricing page and checkout forms for credit packs/subscription.
+  - `app/(marketing)/pricing/page.tsx`: pricing page with free/current-plan state, six paid products, checkout forms, and Manage billing portal button.
   - `app/(auth)/login/page.tsx`: login page.
   - `app/(auth)/callback/route.ts`: Supabase auth callback that exchanges code for session and creates profile.
   - `app/(auth)/login/google/route.ts`: starts Google OAuth from the server so PKCE verifier is stored in cookies.
@@ -88,7 +88,7 @@ This repo is a production-oriented AI SaaS boilerplate built to launch small AI 
   - `app/api/jobs/result/[id]/route.ts`: authenticated signed result URL redirect.
   - `app/api/inngest/route.ts`: Inngest webhook/function endpoint.
   - `app/api/stripe/checkout/route.ts`: Stripe Checkout session creation.
-  - `app/api/stripe/portal/route.ts`: Stripe customer portal session creation.
+  - `app/api/stripe/portal/route.ts`: Stripe Billing Portal session creation for logged-in users with an existing `stripeCustomerId`.
   - `app/api/stripe/webhook/route.ts`: Stripe webhook handler.
   - `app/api/health/route.ts`: production health check for env presence and DB connectivity; protected by `HEALTHCHECK_SECRET` in production.
   - `app/robots.ts` and `app/sitemap.ts`: SEO crawler endpoints.
@@ -99,6 +99,9 @@ This repo is a production-oriented AI SaaS boilerplate built to launch small AI 
   - `components/dashboard/job-create-form.tsx`: interactive AI job form.
   - `components/dashboard/job-history.tsx`: table of generated jobs with preview/view/download.
   - `components/dashboard/dashboard-auto-refresh.tsx`: client-side refresh loop for active jobs.
+  - `components/billing/billing-portal-button.tsx`: client button that POSTs to `/api/stripe/portal` and redirects to Stripe Billing Portal.
+  - `components/exercises/ExerciseSetView.tsx`: generated mini lesson/exercise flow. It caches generated sets and persists current exercise progress in `localStorage` per `analysisId:weakPointId` so refresh resumes at the same exercise.
+  - `components/exercises/SpeakExercise.tsx`: speaking exercise. It uses Deepgram Flux through temporary tokens, prefetches the token on mount, starts recording non-blockingly, and falls back to browser SpeechRecognition.
 
 - `lib/`: service clients, domain logic, providers.
   - `lib/db/`: Drizzle schema, DB client, queries, RLS SQL.
@@ -147,7 +150,7 @@ From `.env.example`:
 - `UPSTASH_REDIS_REST_TOKEN`: Upstash Redis REST token. Values are normalized to tolerate accidental wrapping quotes. Required in production for job concurrency and API abuse rate limits.
 - `RESEND_API_KEY`: Resend API key. Optional operationally; email failures are non-blocking.
 - `RESEND_FROM_EMAIL`: sender email for Resend. Must be a verified domain sender in Resend; Gmail addresses are rejected.
-- `NEXT_PUBLIC_APP_URL`: canonical public app URL, used by metadata, Stripe success/cancel URLs, sitemap, and robots.
+- `NEXT_PUBLIC_APP_URL`: canonical public app URL, currently `https://www.aigetfluent.com`; used by metadata, Stripe success/cancel/portal return URLs, sitemap, robots, and origin checks.
 - `HEALTHCHECK_SECRET`: bearer token required by `/api/health` in production.
 - `FREE_SIGNUP_CREDITS`: credits granted when a user profile is created for the first time.
 - `MAX_CONCURRENT_JOBS`: per-user active job concurrency limit enforced through Upstash Redis.
@@ -173,13 +176,16 @@ Defaults live in `lib/redis/rate-limit.ts`. These env vars are optional override
 
 Schema source: `lib/db/schema.ts`.
 
-- `users`
-  - `id`: internal app UUID primary key.
-  - `authUserId`: Supabase Auth user id. Unique link to `auth.users`.
-  - `email`: user email.
-  - `fullName`: optional display name from auth metadata.
-  - `stripeCustomerId`: optional Stripe customer id, set during checkout/portal flows.
-  - `createdAt`, `updatedAt`: timestamps.
+	- `users`
+	  - `id`: internal app UUID primary key.
+	  - `authUserId`: Supabase Auth user id. Unique link to `auth.users`.
+	  - `email`: user email.
+	  - `fullName`: optional display name from auth metadata.
+	  - `stripeCustomerId`: optional Stripe customer id, set during checkout/portal flows.
+	    - Checkout reuses this id when present.
+	    - If missing, checkout creates a Stripe Customer and stores it before creating the Checkout Session.
+	    - Billing Portal does not create customers; it returns a clear error when the id is missing.
+	  - `createdAt`, `updatedAt`: timestamps.
 
 - `credits`
   - `id`: UUID primary key.
@@ -285,12 +291,21 @@ RLS:
 
 - Stripe credit additions:
   - `app/api/stripe/webhook/route.ts` handles `checkout.session.completed` for one-time credit packs.
-  - It calls `addCredits()` in `lib/db/queries.ts`.
-  - `addCredits()` inserts the transaction first and only increments balance if the transaction is new.
+  - `checkout.session.completed` stores `session.customer` as `users.stripeCustomerId` when Stripe returns it.
+  - DB helpers insert the transaction first and only change credits if the transaction is new.
 
 - Subscription credits:
   - `invoice.paid` webhooks retrieve the subscription, read Stripe Price metadata, and reset subscription credits to that metadata value.
+  - `invoice.paid` supports both legacy `invoice.subscription` and newer Stripe API shapes where the subscription id lives under `invoice.parent.subscription_details.subscription`.
+  - Subscription invoice user resolution falls back through subscription metadata, invoice metadata, saved `stripeSubscriptionId`, and saved `stripeCustomerId`; it does not rely only on metadata.
   - Subscription rows are inserted or updated with Stripe period/status data.
+  - `customer.subscription.deleted` marks the matching subscription row canceled by `stripeSubscriptionId`.
+
+- Stripe Billing Portal:
+  - Frontend buttons live in `/pricing` and `/dashboard`.
+  - They call `POST /api/stripe/portal` and redirect with `window.location.href = data.url`.
+  - The endpoint requires auth, resolves the internal user profile, requires a saved `stripeCustomerId`, and creates `stripe.billingPortal.sessions.create({ customer, return_url: `${NEXT_PUBLIC_APP_URL}/dashboard` })`.
+  - If the Stripe Dashboard customer portal is not configured, the endpoint returns a clear configuration error. Manual setup is required in Stripe Dashboard > Billing > Customer portal.
 
 - Rate/concurrency:
   - `reserveJobSlot()` and `releaseJobSlot()` live in `lib/redis/rate-limit.ts`.
@@ -377,41 +392,44 @@ Implemented and tested:
 - Dashboard auto-refresh while jobs are `pending` or `processing`.
 - Job history with preview, view, download, and audio player.
 - Logout.
-- Pricing page with pack/plan selection before Stripe Checkout.
-- Stripe Checkout routes using HTTP 303 redirects after POST.
-- Stripe webhook route for credit purchase, subscription payment, and subscription deletion.
+- Pricing page with six paid products plus free/current-plan state before Stripe Checkout.
+- Stripe Checkout routes using HTTP 303 redirects after POST; checkout reuses saved Stripe Customers and creates/stores one only when missing.
+- Stripe webhook route for credit purchase, subscription payment, and subscription deletion, including newer Stripe invoice parent subscription shapes.
 - Stripe credit grants are idempotent by event id.
-- Stripe customer portal route.
+- Stripe Billing Portal route and frontend button, returning JSON `{ url }` and redirecting client-side.
+- Production Google login confirmed through Supabase OAuth.
+- Production Stripe subscription purchase confirmed: webhook delivered `checkout.session.completed` and `invoice.paid`, user subscription credits were credited.
+- Speaking exercise STT startup now mirrors conversation behavior by prefetching Deepgram token and starting recording without waiting for the token request.
+- Generated exercise progress now resumes after refresh via `localStorage` keyed by `analysisId:weakPointId`.
 - Resend email templates and send helpers, with failures made non-blocking.
 - Vercel env quote issues mitigated for `DATABASE_URL` and Upstash vars.
 - Job spends are tracked as `credit_spend` transactions.
 - Job refunds are idempotent.
 - `/api/auth/session` debug endpoint has been removed.
 
-Current local unpushed change:
-- `lib/stripe/pricing.ts` has visible test prices changed to:
-  - 10 credits: `$1`
-  - 50 credits: `$2`
-  - Pro monthly: `$3`
-- This is not committed/pushed at the time this file was generated.
+Current operational notes:
+- Official production URL is `https://www.aigetfluent.com`.
+- `.env.local` may contain live Stripe keys; never commit local env files.
+- Stripe live webhook endpoint is expected at `https://www.aigetfluent.com/api/stripe/webhook`.
 
 Known placeholders or pending pieces:
+- Stripe Billing Portal must be configured manually in Stripe Dashboard > Billing > Customer portal.
 - `STRIPE_WEBHOOK_SECRET` must be set per deployment environment for real Stripe webhook processing.
 - `HEALTHCHECK_SECRET` should be set in production if `/api/health` is used.
 - Resend requires a verified sender domain. `gmail.com` senders are rejected by Resend.
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is configured but not used by embedded Stripe UI; current flow uses external Stripe Checkout.
 - There is no embedded Stripe checkout.
 - There is no admin UI.
-- There are no automated tests yet.
+- There are automated tests for Stripe pricing/checkout/webhook/portal behavior and Deepgram token/STT helpers, but no browser E2E suite yet.
 - There is no realtime job subscription; dashboard currently uses polling/refresh.
 - Error messages are functional but not polished product UX.
 - Google OAuth setup depends on external Google Cloud and Supabase provider configuration.
 
 ## 10. Próximos pasos sugeridos
 
-1. Finish Stripe end-to-end.
-   - Set `STRIPE_WEBHOOK_SECRET` in Vercel.
-   - Run a test purchase.
+1. Finish production billing verification.
+   - Confirm Vercel production has `NEXT_PUBLIC_APP_URL=https://www.aigetfluent.com`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET`.
+   - Confirm Stripe Billing Portal is configured and the `/dashboard` Billing button opens it for a subscribed user.
    - Confirm credits are added through webhook.
    - Confirm `transactions` table gets the Stripe event id.
    - Confirm duplicate webhook events do not duplicate credits.
