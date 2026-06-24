@@ -25,9 +25,9 @@ const mockIncrementSttAudioMsUsed = vi.mocked(incrementSttAudioMsUsed);
 const mockCheckSttMetricsRateLimit = vi.mocked(checkSttMetricsRateLimit);
 
 function metricRequest(body: unknown) {
-  return new Request("http://localhost/api/stt/metrics", {
+  return new Request("http://localhost:3000/api/stt/metrics", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
     body: JSON.stringify(body)
   });
 }

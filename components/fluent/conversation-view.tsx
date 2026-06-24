@@ -29,7 +29,7 @@ import type { ConversationTurn, EnglishLevel } from "@/lib/db/schema";
 
 const START_CONVERSATION_TEXT = "[START_CONVERSATION]";
 const SILENCE_BEFORE_SEND_MS = 3000;
-const DEEPGRAM_FINAL_SEND_GRACE_MS = 2200;
+const DEEPGRAM_FINAL_SEND_GRACE_MS = 1500;
 const DEEPGRAM_MAX_TURN_MS = 60000;
 const DEEPGRAM_PREFETCH_MIN_TOKEN_MS = 5000;
 const DEEPGRAM_PREFETCH_REFRESH_BEFORE_EXPIRY_MS = 8000;
@@ -271,6 +271,7 @@ export function ConversationView({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const deepgramPreviewRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const deepgramProviderRef = useRef<SpeechToTextProvider | null>(null);
   const activeSpeechInputProviderRef = useRef<SpeechInputProvider | null>(null);
   const listeningRef = useRef(false);
@@ -914,6 +915,7 @@ export function ConversationView({
       if (activeSpeechInputProviderRef.current === "deepgram_flux") {
         clearDeepgramFinalTimer();
         clearDeepgramMaxTurnTimer();
+        stopDeepgramPreviewTranscript();
         shouldSendOnEndRef.current = false;
         listeningRef.current = false;
         activeSpeechInputProviderRef.current = null;
@@ -966,6 +968,7 @@ export function ConversationView({
       premiumPlayerRef.current?.stop();
       premiumFallbackVoiceRef.current?.stop();
       stopPremiumReplayAudio();
+      stopDeepgramPreviewTranscript();
       deepgramProviderRef.current?.cancel();
       deepgramProviderRef.current = null;
       pendingRoundtripRef.current = null;
@@ -1052,6 +1055,50 @@ export function ConversationView({
     [progress.isComplete, setPhase, stopListening, submitUserText]
   );
 
+  function stopDeepgramPreviewTranscript() {
+    const preview = deepgramPreviewRecognitionRef.current;
+    deepgramPreviewRecognitionRef.current = null;
+    try {
+      preview?.abort();
+    } catch {
+      // Preview captions are best-effort; Deepgram remains the source of truth.
+    }
+  }
+
+  function startDeepgramPreviewTranscript() {
+    stopDeepgramPreviewTranscript();
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) return;
+
+    const recognition = new Recognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let index = 0; index < event.results.length; index += 1) {
+        transcript += event.results[index][0].transcript;
+      }
+      const nextText = transcript.trim();
+      if (!nextText || deepgramFinalSentRef.current) return;
+      speechDraftRef.current = nextText;
+      setText(nextText);
+    };
+    recognition.onerror = () => {
+      if (deepgramPreviewRecognitionRef.current === recognition) deepgramPreviewRecognitionRef.current = null;
+    };
+    recognition.onend = () => {
+      if (deepgramPreviewRecognitionRef.current === recognition) deepgramPreviewRecognitionRef.current = null;
+    };
+
+    try {
+      deepgramPreviewRecognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      deepgramPreviewRecognitionRef.current = null;
+    }
+  }
+
   const startDeepgramListening = useCallback(async () => {
     postSttMetric({
       sessionId,
@@ -1096,6 +1143,7 @@ export function ConversationView({
     listeningRef.current = true;
     activeSpeechInputProviderRef.current = "deepgram_flux";
     setPhase("user_speaking");
+    startDeepgramPreviewTranscript();
     postSttMetric({ sessionId, event: "deepgram_turn_start", provider: "deepgram_flux", selectedByFlag: true });
     deepgramMaxTurnTimerRef.current = window.setTimeout(() => {
       console.warn(`[deepgram-stt-limit] sessionId=${sessionId} reason=max_turn_duration`);
@@ -1119,6 +1167,7 @@ export function ConversationView({
       listeningRef.current = false;
       clearDeepgramFinalTimer();
       clearDeepgramMaxTurnTimer();
+      stopDeepgramPreviewTranscript();
       pendingDeepgramFinalMetricRef.current = null;
       pendingRoundtripRef.current = null;
       resetDeepgramTurnInstrumentation();
@@ -1132,6 +1181,7 @@ export function ConversationView({
 
       clearDeepgramFinalTimer();
       clearDeepgramMaxTurnTimer();
+      stopDeepgramPreviewTranscript();
       deepgramFinalSentRef.current = true;
       listeningRef.current = false;
       activeSpeechInputProviderRef.current = null;
@@ -1169,6 +1219,7 @@ export function ConversationView({
       prefetchedTokenPromise,
       onPartialTranscript: ({ transcript, turnIndex }) => {
         if (deepgramFinalSentRef.current) return;
+        stopDeepgramPreviewTranscript();
         clearDeepgramFinalTimer();
         pendingDeepgramFinalMetricRef.current = null;
         pendingRoundtripRef.current = null;
@@ -1181,6 +1232,7 @@ export function ConversationView({
         updateDeepgramAccumulatedTranscript({ transcript, turnIndex, trackTranscriptChange: true });
       },
       onFinalTranscript: ({ transcript, metadata, turnIndex }) => {
+        stopDeepgramPreviewTranscript();
         const eotConfirmedAt = performance.now();
         const lastTranscriptChangeAt = deepgramLastTranscriptChangeAtRef.current ?? eotConfirmedAt;
         const postSpeechSilenceMs = Math.max(0, Math.round(eotConfirmedAt - lastTranscriptChangeAt));
@@ -1425,6 +1477,7 @@ export function ConversationView({
       clearDeepgramMaxTurnTimer();
       clearPremiumAudioTimer();
       recognitionRef.current?.abort();
+      stopDeepgramPreviewTranscript();
       deepgramProviderRef.current?.cancel();
       deepgramProviderRef.current = null;
       activeSpeechInputProviderRef.current = null;

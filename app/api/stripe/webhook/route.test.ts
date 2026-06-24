@@ -1,9 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/lib/db";
-import { addPackCredits, resetSubscriptionCredits } from "@/lib/db/queries";
+import { addPackCredits, getUserCreditBalance, resetSubscriptionCredits } from "@/lib/db/queries";
+import { sendTelegram } from "@/lib/notify/telegram";
 import { getStripe } from "@/lib/stripe/client";
 import { getStripePriceCreditMetadata } from "@/lib/stripe/pricing";
 import { POST } from "@/app/api/stripe/webhook/route";
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    after: vi.fn((callback: () => void | Promise<void>) => {
+      void callback();
+    })
+  };
+});
 
 vi.mock("@/lib/db", () => ({
   getDb: vi.fn()
@@ -11,7 +22,12 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/queries", () => ({
   addPackCredits: vi.fn(),
+  getUserCreditBalance: vi.fn(),
   resetSubscriptionCredits: vi.fn()
+}));
+
+vi.mock("@/lib/notify/telegram", () => ({
+  sendTelegram: vi.fn()
 }));
 
 vi.mock("@/lib/stripe/client", () => ({
@@ -28,7 +44,9 @@ vi.mock("@/lib/stripe/pricing", async (importOriginal) => {
 
 const mockGetDb = vi.mocked(getDb);
 const mockAddPackCredits = vi.mocked(addPackCredits);
+const mockGetUserCreditBalance = vi.mocked(getUserCreditBalance);
 const mockResetSubscriptionCredits = vi.mocked(resetSubscriptionCredits);
+const mockSendTelegram = vi.mocked(sendTelegram);
 const mockGetStripe = vi.mocked(getStripe);
 const mockGetStripePriceCreditMetadata = vi.mocked(getStripePriceCreditMetadata);
 
@@ -69,6 +87,12 @@ describe("POST /api/stripe/webhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+    mockGetUserCreditBalance.mockResolvedValue({
+      creditsSubscription: 15,
+      creditsPack: 0,
+      total: 15
+    });
+    mockSendTelegram.mockResolvedValue(undefined);
     dbMocks = mockDb();
     mockGetStripe.mockReturnValue({
       webhooks: { constructEvent },

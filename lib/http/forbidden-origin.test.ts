@@ -27,9 +27,10 @@ describe("rejectForbiddenOrigin", () => {
     expect(response).toBeNull();
   });
 
-  it("allows requests without Origin for non-browser clients", () => {
+  it("rejects requests without Origin", async () => {
     const response = rejectForbiddenOrigin(new Request("http://localhost:3000/api/conversation/stream"), "test");
 
-    expect(response).toBeNull();
+    expect(response?.status).toBe(403);
+    await expect(response?.json()).resolves.toEqual({ error: "Forbidden" });
   });
 });

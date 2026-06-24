@@ -33,9 +33,9 @@ const mockGetUserLanguageProfile = vi.mocked(getUserLanguageProfile);
 const mockGetAnthropic = vi.mocked(getAnthropic);
 
 function translateRequest(body: unknown) {
-  return new Request("http://localhost/api/conversation/translate", {
+  return new Request("http://localhost:3000/api/conversation/translate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
     body: JSON.stringify(body)
   });
 }
