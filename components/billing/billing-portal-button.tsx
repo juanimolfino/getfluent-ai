@@ -31,7 +31,7 @@ export function BillingPortalButton({ children, className }: BillingPortalButton
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function openBillingPortal() {
+  async function handleOpenBillingPortal() {
     setError(null);
     setPending(true);
 
@@ -46,7 +46,7 @@ export function BillingPortalButton({ children, className }: BillingPortalButton
 
   return (
     <span className="billing-portal-control">
-      <button type="button" className={className} onClick={openBillingPortal} disabled={pending}>
+      <button type="button" className={className} onClick={handleOpenBillingPortal} disabled={pending}>
         {pending ? "Opening..." : children}
       </button>
       {error ? <span className="billing-portal-error" role="alert">{error}</span> : null}
