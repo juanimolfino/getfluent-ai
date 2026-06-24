@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import Stripe from "stripe";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { addPackCredits, resetSubscriptionCredits } from "@/lib/db/queries";
+import { addPackCredits, getUserCreditBalance, resetSubscriptionCredits } from "@/lib/db/queries";
 import { subscriptions, users } from "@/lib/db/schema";
+import { sendTelegram } from "@/lib/notify/telegram";
 import { getStripe } from "@/lib/stripe/client";
 import { getStripePriceCreditMetadata } from "@/lib/stripe/pricing";
 
@@ -113,12 +114,27 @@ export async function POST(request: Request) {
       const priceMetadata = await getStripePriceCreditMetadata(priceId);
       if (priceMetadata.type !== "pack") return NextResponse.json({ error: "Invalid checkout price metadata" }, { status: 400 });
 
-      await addPackCredits(userId, priceMetadata.credits, {
-        kind: "pack",
-        checkoutSessionId: session.id,
-        priceId,
-        amountCents: session.amount_total ?? 0
-      }, event.id);
+      const amountCents = session.amount_total ?? 0;
+      const currency = (session.currency ?? "").toUpperCase();
+      try {
+        await addPackCredits(userId, priceMetadata.credits, {
+          kind: "pack",
+          checkoutSessionId: session.id,
+          priceId,
+          amountCents
+        }, event.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await sendTelegram(`🚨 ERROR acreditando PACK\nUser: ${userId}\nEvento: ${event.id}\nError: ${message}`);
+        return NextResponse.json({ error: "credit grant failed" }, { status: 500 });
+      }
+
+      after(async () => {
+        const balance = await getUserCreditBalance(userId);
+        await sendTelegram(
+          `✅ Pago PACK\nUser: ${userId}\nMonto: ${amountCents / 100} ${currency}\nCréditos otorgados: ${priceMetadata.credits}\nSaldo actual: ${balance.total}`
+        );
+      });
     }
   }
 
@@ -149,12 +165,26 @@ export async function POST(request: Request) {
         const periodEnd = period.periodEnd
           ? new Date(period.periodEnd * 1000)
           : null;
-        await resetSubscriptionCredits(userId, priceMetadata.credits, {
-          kind: "subscription",
-          subscriptionId,
-          priceId,
-          amountCents: invoice.amount_paid
-        }, event.id);
+        const currency = (invoice.currency ?? "").toUpperCase();
+        try {
+          await resetSubscriptionCredits(userId, priceMetadata.credits, {
+            kind: "subscription",
+            subscriptionId,
+            priceId,
+            amountCents: invoice.amount_paid
+          }, event.id);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await sendTelegram(`🚨 ERROR acreditando SUB\nUser: ${userId}\nEvento: ${event.id}\nError: ${message}`);
+          return NextResponse.json({ error: "credit grant failed" }, { status: 500 });
+        }
+
+        after(async () => {
+          const balance = await getUserCreditBalance(userId);
+          await sendTelegram(
+            `✅ Pago SUB\nUser: ${userId}\nMonto: ${invoice.amount_paid / 100} ${currency}\nCréditos otorgados: ${priceMetadata.credits}\nSaldo actual: ${balance.total}`
+          );
+        });
         await getDb().insert(subscriptions).values({
           userId,
           plan: subscription.metadata.plan ?? invoiceMetadata.plan ?? "pro",
