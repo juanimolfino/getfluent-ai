@@ -797,7 +797,7 @@ export function ConversationView({
 
     const cache = deepgramTokenCacheRef.current;
     const now = performance.now();
-    if (cache.token && cache.expiresAt && cache.expiresAt - now > DEEPGRAM_PREFETCH_MIN_TOKEN_MS) return cache.promise;
+    if (cache.token && cache.expiresAt && cache.expiresAt - now > DEEPGRAM_PREFETCH_MIN_TOKEN_MS) return Promise.resolve(cache.token);
     if (cache.promise) return cache.promise;
 
     clearDeepgramTokenRefreshTimer();
@@ -1409,6 +1409,16 @@ export function ConversationView({
     premiumPlayerRef.current.onError((error) => fallbackToBrowserVoice(error.message));
 
     return () => {
+      clearPremiumAudioTimer();
+      browserPlayerRef.current?.stop();
+      premiumPlayerRef.current?.stop();
+      premiumFallbackVoiceRef.current?.stop();
+      stopPremiumReplayAudio();
+    };
+  }, [isPremium, markVoiceStarted, premiumSttProvider, setPhase]);
+
+  useEffect(() => {
+    return () => {
       flushSttMetrics();
       if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
       clearDeepgramFinalTimer();
@@ -1423,7 +1433,7 @@ export function ConversationView({
       premiumFallbackVoiceRef.current?.stop();
       stopPremiumReplayAudio();
     };
-  }, [isPremium, markVoiceStarted, premiumSttProvider, setPhase]);
+  }, []);
 
   useEffect(() => {
     browserPlayerRef.current?.setRate(voiceRate);
