@@ -40,21 +40,7 @@ export function unlockAudioPlayback() {
   if (typeof window === "undefined") return;
 
   const context = getSharedAudioContext();
-  if (context) {
-    void context.resume().catch(() => {});
-    try {
-      // iOS needs an actual sound-producing node started inside the gesture to fully
-      // unlock Web Audio output. resume() alone leaves later streaming playback silent,
-      // which is why the first (HTMLAudio) reply played but streamed replies did not.
-      const buffer = context.createBuffer(1, 1, 22050);
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(context.destination);
-      source.start(0);
-    } catch {
-      // Ignore engines that reject the silent unlock buffer.
-    }
-  }
+  void context?.resume().catch(() => {});
 
   if ("speechSynthesis" in window) {
     try {
