@@ -88,8 +88,8 @@ describe("POST /api/stripe/webhook", () => {
     vi.clearAllMocks();
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
     mockGetUserCreditBalance.mockResolvedValue({
-      creditsSubscription: 15,
-      creditsPack: 0,
+      subscription: 15,
+      pack: 0,
       total: 15
     });
     mockSendTelegram.mockResolvedValue(undefined);
