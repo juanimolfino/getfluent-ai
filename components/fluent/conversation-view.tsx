@@ -315,6 +315,7 @@ export function ConversationView({
   const pendingCompletionRef = useRef(false);
   const audioNeedsGestureRef = useRef(false);
   const audioUnlockedRef = useRef(false);
+  const audioUsesBlobRef = useRef(false);
   const pendingGreetingTurnRef = useRef<ConversationTurn | null>(null);
   const phaseRef = useRef<ConversationPhase>("idle");
   const currentAssistantTextRef = useRef("");
@@ -371,6 +372,26 @@ export function ConversationView({
 
         if (premiumFallbackRef.current) {
           speakPremiumFallback(fullText);
+          return;
+        }
+
+        // iOS: play the whole reply as one HTMLAudio blob (Web Audio output is muted
+        // after the mic session used for STT). Wait for a gesture if not yet unlocked.
+        if (audioUsesBlobRef.current) {
+          const blob = premiumReplayAudioByTurnRef.current.get(assistantTurn.timestamp);
+          commitPendingAssistantTurn();
+          setPremiumRevealedText(fullText);
+          if (!audioUnlockedRef.current) {
+            pendingGreetingTurnRef.current = assistantTurn;
+            setPhase(pendingCompletionRef.current ? "complete" : "idle");
+            return;
+          }
+          if (blob) {
+            logAudioDebug(`ios blob playback bytes=${blob.size}`);
+            playPremiumReplayBlob(blob, assistantTurn);
+          } else {
+            fallbackToBrowserVoice("no premium audio chunks (ios blob)");
+          }
           return;
         }
 
@@ -471,17 +492,21 @@ export function ConversationView({
     premiumReplayObjectUrlRef.current = objectUrl;
     premiumReplayElementRef.current = audio;
 
+    audio.onplaying = () => logAudioDebug("blob audio playing");
     audio.onended = () => {
+      logAudioDebug("blob audio ended");
       stopPremiumReplayAudio();
       setPhase(pendingCompletionRef.current ? "complete" : "idle");
       pendingCompletionRef.current = false;
     };
     audio.onerror = () => {
+      logAudioDebug("blob audio ERROR → browser voice");
       stopPremiumReplayAudio();
       replayWithBrowserVoice(fallbackTurn);
     };
 
-    void audio.play().catch(() => {
+    void audio.play().catch((error) => {
+      logAudioDebug(`blob audio play() rejected: ${error instanceof Error ? error.message : String(error)}`);
       stopPremiumReplayAudio();
       replayWithBrowserVoice(fallbackTurn);
     });
@@ -622,10 +647,10 @@ export function ConversationView({
 
     clearPremiumAudioTimer();
 
-    // On a locked touch device, collect the chunks for later replay but don't start
-    // playback (it would be silently dropped). onComplete handles the deferred replay.
-    if (audioNeedsGestureRef.current && !audioUnlockedRef.current) {
-      logAudioDebug(`audio chunk deferred (locked, needs gesture) seq=${seq}`);
+    // iOS plays a single blob (Web Audio is muted post-mic), and a locked touch device
+    // must wait for a gesture — in both cases just collect chunks; onComplete plays them.
+    if (audioUsesBlobRef.current || (audioNeedsGestureRef.current && !audioUnlockedRef.current)) {
+      logAudioDebug(`audio chunk collected (blob=${audioUsesBlobRef.current}) seq=${seq}`);
       currentPremiumAudioChunksRef.current.push({ chunk, seq });
       setPremiumLiveBubbleActive(true);
       return;
@@ -1505,6 +1530,12 @@ export function ConversationView({
   useEffect(() => {
     audioNeedsGestureRef.current = audioRequiresUserGesture();
     audioUnlockedRef.current = isAudioUnlocked();
+    // iOS (all WebKit browsers) mutes the Web Audio AudioContext output after the mic
+    // is used for STT, so on iOS we play each reply as a single HTMLAudio blob instead.
+    const ua = navigator.userAgent;
+    audioUsesBlobRef.current =
+      /iP(hone|od|ad)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    logAudioDebug(`device: needsGesture=${audioNeedsGestureRef.current} usesBlob=${audioUsesBlobRef.current}`);
     if (!audioNeedsGestureRef.current || audioUnlockedRef.current) return;
 
     const handleFirstGesture = () => {
