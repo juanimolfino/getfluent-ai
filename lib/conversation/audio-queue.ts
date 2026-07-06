@@ -1,5 +1,6 @@
 "use client";
 
+import { logAudioDebug } from "@/lib/conversation/audio-debug";
 import { getSharedAudioContext } from "@/lib/conversation/audio-unlock";
 
 export type AudioQueue = {
@@ -232,7 +233,10 @@ function createWebAudioQueue(): AudioQueue {
 
     try {
       const context = ensureContext();
+      const stateBefore = context.state;
       await context.resume();
+      if (stateBefore !== context.state) logAudioDebug(`ctx ${stateBefore} → ${context.state}`);
+      else logAudioDebug(`ctx state=${context.state}`);
 
       while (pendingChunks.has(expectedSeq)) {
         const chunk = pendingChunks.get(expectedSeq);
@@ -240,7 +244,14 @@ function createWebAudioQueue(): AudioQueue {
         pendingChunks.delete(expectedSeq);
         expectedSeq += 1;
 
-        const audioBuffer = await context.decodeAudioData(toArrayBuffer(chunk));
+        let audioBuffer: AudioBuffer;
+        try {
+          audioBuffer = await context.decodeAudioData(toArrayBuffer(chunk));
+        } catch (decodeError) {
+          logAudioDebug(`decode FAIL seq=${expectedSeq - 1} bytes=${chunk.byteLength} err=${decodeError instanceof Error ? decodeError.message : String(decodeError)}`);
+          throw decodeError;
+        }
+        logAudioDebug(`decode ok seq=${expectedSeq - 1} dur=${audioBuffer.duration.toFixed(2)}s`);
         const source = context.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(context.destination);
@@ -255,6 +266,7 @@ function createWebAudioQueue(): AudioQueue {
           }, delayMs);
         }
         source.start(startAt);
+        logAudioDebug(`source.start seq=${expectedSeq - 1} at=${startAt.toFixed(2)} ctxTime=${context.currentTime.toFixed(2)}`);
         nextStartTime = startAt + audioBuffer.duration;
         playing = true;
         activeSources.add(source);
@@ -267,6 +279,7 @@ function createWebAudioQueue(): AudioQueue {
         };
       }
     } catch (error) {
+      logAudioDebug(`drain error → fallback: ${error instanceof Error ? error.message : String(error)}`);
       errorCallback?.(error instanceof Error ? error : new Error("Could not decode premium audio chunk"));
     } finally {
       draining = false;
@@ -279,7 +292,9 @@ function createWebAudioQueue(): AudioQueue {
       void drain();
     },
     start() {
-      void ensureContext().resume();
+      const context = ensureContext();
+      logAudioDebug(`WebAudio start() ctx=${context.state}`);
+      void context.resume();
       void drain();
     },
     stop() {
@@ -325,5 +340,7 @@ function createWebAudioQueue(): AudioQueue {
 
 export function createAudioQueue(): AudioQueue {
   if (typeof window === "undefined") return createNoopAudioQueue();
-  return canUseMediaSource() ? createMseAudioQueue() : createWebAudioQueue();
+  const useMse = canUseMediaSource();
+  logAudioDebug(`createAudioQueue → ${useMse ? "MSE" : "WebAudio"}`);
+  return useMse ? createMseAudioQueue() : createWebAudioQueue();
 }

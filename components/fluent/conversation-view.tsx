@@ -5,6 +5,8 @@ import Link from "next/link";
 import { BarChart3, Languages, Loader2, Mic, Send, Square, Volume2 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { audioRequiresUserGesture, isAudioUnlocked, unlockAudioPlayback } from "@/lib/conversation/audio-unlock";
+import { AudioDebugOverlay } from "@/components/fluent/audio-debug-overlay";
+import { logAudioDebug } from "@/lib/conversation/audio-debug";
 import { createBrowserVoicePlayer, type VoicePlayer } from "@/lib/conversation/browser-voice";
 import {
   createDeepgramFluxSpeechProvider,
@@ -592,6 +594,7 @@ export function ConversationView({
 
     premiumFallbackRef.current = true;
     clearPremiumAudioTimer();
+    logAudioDebug(`premium fallback → browser voice: ${reason}`);
     console.warn(`[premium-audio-fallback] conversation sessionId=${sessionId} reason=${reason}`);
     premiumPlayerRef.current?.stop();
     setPremiumLiveBubbleActive(true);
@@ -622,6 +625,7 @@ export function ConversationView({
     // On a locked touch device, collect the chunks for later replay but don't start
     // playback (it would be silently dropped). onComplete handles the deferred replay.
     if (audioNeedsGestureRef.current && !audioUnlockedRef.current) {
+      logAudioDebug(`audio chunk deferred (locked, needs gesture) seq=${seq}`);
       currentPremiumAudioChunksRef.current.push({ chunk, seq });
       setPremiumLiveBubbleActive(true);
       return;
@@ -631,6 +635,7 @@ export function ConversationView({
     if (!player) return;
 
     if (!premiumPlaybackStartedRef.current) {
+      logAudioDebug(`premium playback starting seq=${seq} unlocked=${audioUnlockedRef.current} needsGesture=${audioNeedsGestureRef.current}`);
       premiumPlaybackStartedRef.current = true;
       setPremiumLiveBubbleActive(true);
       player.speak(currentAssistantTextRef.current);
@@ -1644,6 +1649,7 @@ export function ConversationView({
 
   return (
     <div className="gf-page gf-chat">
+      <AudioDebugOverlay />
       <div className="shell">
         {/* SIDEBAR */}
         <aside className="aside">
