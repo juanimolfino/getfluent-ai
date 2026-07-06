@@ -30,6 +30,10 @@ import { useConversationStream, type ConversationPhase, type StreamTimingChar, t
 import type { ConversationTurn, EnglishLevel } from "@/lib/db/schema";
 
 const START_CONVERSATION_TEXT = "[START_CONVERSATION]";
+// Tiny silent WAV used to "prime" (user-activate) the persistent audio element inside a
+// gesture on iOS, so later programmatic play() calls are allowed even after mic use.
+const SILENT_AUDIO_WAV =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=";
 const SILENCE_BEFORE_SEND_MS = 3000;
 const DEEPGRAM_FINAL_SEND_GRACE_MS = 1500;
 const DEEPGRAM_MAX_TURN_MS = 60000;
@@ -461,14 +465,45 @@ export function ConversationView({
   }
 
   function stopPremiumReplayAudio() {
+    // Keep the element instance alive: iOS ties the "user activated" playback permission
+    // to the element, so reusing one primed element lets later turns play after mic use.
     premiumReplayElementRef.current?.pause();
-    premiumReplayElementRef.current?.removeAttribute("src");
-    premiumReplayElementRef.current?.load();
-    premiumReplayElementRef.current = null;
 
     if (premiumReplayObjectUrlRef.current) {
       URL.revokeObjectURL(premiumReplayObjectUrlRef.current);
       premiumReplayObjectUrlRef.current = null;
+    }
+  }
+
+  function ensurePremiumAudioElement() {
+    let element = premiumReplayElementRef.current;
+    if (!element) {
+      element = new Audio();
+      element.setAttribute("playsinline", "true");
+      premiumReplayElementRef.current = element;
+    }
+    return element;
+  }
+
+  // Must run inside a user gesture. Plays a silent clip once to user-activate the shared
+  // audio element so later blob playback is allowed on iOS even after the mic session.
+  function primePremiumAudioElement() {
+    if (!audioUsesBlobRef.current) return;
+    const element = ensurePremiumAudioElement();
+    try {
+      element.src = SILENT_AUDIO_WAV;
+      const played = element.play();
+      if (played) {
+        played
+          .then(() => {
+            element.pause();
+            element.currentTime = 0;
+            logAudioDebug("audio element primed");
+          })
+          .catch((error) => logAudioDebug(`audio prime failed: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    } catch (error) {
+      logAudioDebug(`audio prime threw: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -487,10 +522,12 @@ export function ConversationView({
     pendingCompletionRef.current = progress.isComplete;
     setPhase("alex_speaking");
 
+    // Reuse the persistent (already user-activated) element instead of new Audio(), so
+    // iOS allows programmatic play() on later turns after the mic has been used.
+    const audio = ensurePremiumAudioElement();
     const objectUrl = URL.createObjectURL(blob);
-    const audio = new Audio(objectUrl);
     premiumReplayObjectUrlRef.current = objectUrl;
-    premiumReplayElementRef.current = audio;
+    audio.src = objectUrl;
 
     audio.onplaying = () => logAudioDebug("blob audio playing");
     audio.onended = () => {
@@ -1429,6 +1466,10 @@ export function ConversationView({
   }, [consumeDeepgramPrefetchedToken, sessionId, setPhase, startBrowserListening, stopListening, submitUserText]);
 
   const startListening = useCallback(() => {
+    // Re-activate the audio element within this tap gesture so Alex's reply can play
+    // after the mic session (iOS revokes playback permission once the mic is used).
+    primePremiumAudioElement();
+
     if (shouldAttemptDeepgramFluxInput({ isPremium, premiumSttProvider })) {
       void startDeepgramListening();
       return;
@@ -1540,6 +1581,7 @@ export function ConversationView({
 
     const handleFirstGesture = () => {
       unlockAudioPlayback();
+      primePremiumAudioElement();
       audioUnlockedRef.current = true;
       removeListeners();
       // window listeners bubble after React's handlers, so a tapped control (e.g. the
