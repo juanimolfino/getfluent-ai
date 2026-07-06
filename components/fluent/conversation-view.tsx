@@ -467,7 +467,15 @@ export function ConversationView({
   function stopPremiumReplayAudio() {
     // Keep the element instance alive: iOS ties the "user activated" playback permission
     // to the element, so reusing one primed element lets later turns play after mic use.
-    premiumReplayElementRef.current?.pause();
+    const element = premiumReplayElementRef.current;
+    if (element) {
+      // Detach stale handlers so a later src change (e.g. priming) can't fire the
+      // previous turn's onerror and trigger a spurious browser-voice fallback.
+      element.onplaying = null;
+      element.onended = null;
+      element.onerror = null;
+      element.pause();
+    }
 
     if (premiumReplayObjectUrlRef.current) {
       URL.revokeObjectURL(premiumReplayObjectUrlRef.current);
@@ -490,6 +498,11 @@ export function ConversationView({
   function primePremiumAudioElement() {
     if (!audioUsesBlobRef.current) return;
     const element = ensurePremiumAudioElement();
+    // Detach any handlers from a previous blob so swapping in the silent src can't fire
+    // its onerror/onended and block the user's turn.
+    element.onplaying = null;
+    element.onended = null;
+    element.onerror = null;
     try {
       element.src = SILENT_AUDIO_WAV;
       const played = element.play();
