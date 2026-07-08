@@ -1652,6 +1652,8 @@ export function ConversationView({
 
     setIsEnding(true);
     setLocalError(null);
+    // Prime within this tap gesture so the iOS goodbye blob can play after the mic session.
+    primePremiumAudioElement();
 
     try {
       const response = await fetch("/api/conversation/end", {
@@ -1671,6 +1673,23 @@ export function ConversationView({
       setProgress(data.session);
 
       if (data.turn) {
+        if (isPremium && data.premiumAudio?.chunks.length && audioUsesBlobRef.current) {
+          // iOS: play the goodbye as a blob (Web Audio is suspended/muted post-mic and
+          // would hang, never firing onEnded, so the analysis screen never showed).
+          resetPremiumTurnState();
+          storePremiumReplayAudio(data.turn.timestamp, data.premiumAudio.chunks);
+          setTurns((current) => [...current, data.turn as ConversationTurn]);
+          const blob = premiumReplayAudioByTurnRef.current.get(data.turn.timestamp);
+          if (blob) {
+            logAudioDebug(`ios end blob playback bytes=${blob.size}`);
+            playPremiumReplayBlob(blob, data.turn);
+          }
+          // Completion does not depend on audio finishing: show the analysis screen now.
+          pendingCompletionRef.current = true;
+          setPhase("complete");
+          return;
+        }
+
         if (isPremium && data.premiumAudio?.chunks.length) {
           resetPremiumTurnState();
           storePremiumReplayAudio(data.turn.timestamp, data.premiumAudio.chunks);
